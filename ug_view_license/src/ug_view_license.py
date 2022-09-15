@@ -20,7 +20,7 @@
 # with this program; if not, contact the site <https://www.gnu.org/licenses/>.
 #
 #--------------------------------------------------------------------------------------------------- 
-# Версия 1.0
+# Версия 1.1
 # Программа выводит число активных коннектов и список IP-адресов, занимающих лицензию.
 # Так же показывает все данные по текущей лицензии.
 #
@@ -185,7 +185,7 @@ def make_window():
         [TextKey('ATP:')],
         [TextKey('Mail security:')],
         [TextKey('UserGate Antispam:')],
-        [TextKey('Kaspersky AntiVirus:')],
+        [TextKey('Потоковый антивирус UserGate:')],
         [TextKey('Cluster:')],
         [TextKey('Scada:')]
     ]
