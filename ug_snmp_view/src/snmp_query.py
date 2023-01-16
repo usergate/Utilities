@@ -94,11 +94,15 @@ def remove_host_graph():
         os.remove('data/main.png')
 
 def check_snmp(ip, community):
-    status = 0
+    result = 'timeout'
+#    status = 0
     hosts = (ip,)
     oid_group = ("1.3.6.1.2.1.1.1.0",)
     snmp_data = snmp_poller.poller(hosts, (oid_group,), community, msg_type="Get", timeout=0, retry=0)
-    result = next(snmp_data).value.decode()
+    try:
+        result = next(snmp_data).value.decode()
+    except StopIteration:
+        pass
     return result
 
 def get_all_ports(ip, community):

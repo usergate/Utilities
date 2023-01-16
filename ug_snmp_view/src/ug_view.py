@@ -87,7 +87,7 @@ def make_window():
     return sg.Window(
         'Состояние UTM',
         layout, button_color=('Green', 'White'),
-        keep_on_top=True,
+#        keep_on_top=True,
         location=get_location(),
         finalize=True
     )
@@ -197,13 +197,16 @@ def main():
 
         elif event == 'Интерфейсы':
             all_ports = get_all_ports(ip, community)
-            window_status = make_ports(all_ports)
-            if window_status == SETTINGS_UPDATED:
-                window_status, ports = check_ports(ip, community)
-                window.close()
-                del window
-                window = make_window()
-                window_status, ip, community, ports = init_window(window)
+            if not all_ports:
+                sg.PopupError(f'Ошибка!', 'На UTM в настройках SNMP не указано событие:\n"Таблица статистики сетевых интерфейсов"', keep_on_top=True)
+            else:
+                window_status = make_ports(all_ports)
+                if window_status == SETTINGS_UPDATED:
+                    window_status, ports = check_ports(ip, community)
+                    window.close()
+                    del window
+                    window = make_window()
+                    window_status, ip, community, ports = init_window(window)
 
         elif event == 'Графики':
             window_status = make_graphs()
