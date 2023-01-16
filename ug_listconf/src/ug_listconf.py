@@ -4,7 +4,7 @@
 # Работаетв версии 5 и 6.
 # Файл отчёта создаётся в директории программы.
 # 
-# Версия 0.7
+# Версия 0.8
 
 import stdiomask
 from prettytable import PrettyTable
@@ -2886,12 +2886,13 @@ class UTM(UtmXmlRpc):
         ]
 
         for item in data:
+            print(item)
             x.add_row(empty_row)
             general = [
                 "Включено:       ДА" if item['enabled'] else "Включено:       НЕТ",
                 f"Действие:       {action.get(item['action'], 'Error')}",
                 f"Профиль DoS:    {self.list_dos_profiles[item['dos_profile']]}",
-                f"Сценарий:       {self._scenarios[item['scenario_rule_id']]}",
+                f"Сценарий:       {self._scenarios.get(item['scenario_rule_id'], ' - ')}",
                 "Журналирование: Включено" if item['log'] else "Журналирование: Выключено",
             ]
             x.add_row([
@@ -2910,6 +2911,7 @@ class UTM(UtmXmlRpc):
         x.align = "l"
         array.append(x.get_string())
         array.append("\n")
+        print(x.get_string())
         return total, array if total else "\tНет Правил защиты DoS."
 
     def get_library_list(self, items_list):
@@ -3075,8 +3077,8 @@ def main():
 
         except UtmError as err:
             print(err)
-        except Exception as err:
-            print(f'\nОшибка: {err} (Node: {server_ip}).')
+#        except Exception as err:
+#            print(f'\nОшибка: {err} (Node: {server_ip}).')
         else:
             print("\nОтчёт сформирован в файле", f"config_{server_ip.translate(character_map)}.txt\n")
         finally:
