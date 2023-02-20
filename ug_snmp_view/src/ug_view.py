@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #
-# ug_view (simple SNMP viewer for NGFW UserGate), version 2.0.
+# ug_view (simple SNMP viewer for NGFW UserGate), version 2.1.
 #
 # Copyright @ 2020-2022 UserGate Corporation. All rights reserved.
 # Author: Aleksei Remnev <ran1024@yandex.ru>
