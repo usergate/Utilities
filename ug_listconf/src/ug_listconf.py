@@ -4,7 +4,7 @@
 # Работаетв версии 5 и 6.
 # Файл отчёта создаётся в директории программы.
 # 
-# Версия 0.8
+# Версия 0.7
 
 import stdiomask
 from prettytable import PrettyTable
@@ -2886,7 +2886,6 @@ class UTM(UtmXmlRpc):
         ]
 
         for item in data:
-            print(item)
             x.add_row(empty_row)
             general = [
                 "Включено:       ДА" if item['enabled'] else "Включено:       НЕТ",
@@ -2911,7 +2910,6 @@ class UTM(UtmXmlRpc):
         x.align = "l"
         array.append(x.get_string())
         array.append("\n")
-        print(x.get_string())
         return total, array if total else "\tНет Правил защиты DoS."
 
     def get_library_list(self, items_list):
