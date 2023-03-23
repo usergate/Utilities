@@ -4,7 +4,7 @@
 # Работаетв версии 5 и 6.
 # Файл отчёта создаётся в директории программы.
 # 
-# Версия 0.9
+# Версия 0.10
 
 import stdiomask
 from prettytable import PrettyTable
@@ -967,35 +967,36 @@ class UTM(UtmXmlRpc):
 
         total, data = self.get_dns_rules_list()
         if total:
+            array.append(f"\nПравила DNS в DNS-прокси ({total}):\n")
+            x = PrettyTable()
+            x.field_names = ['Название', 'Описание', 'Включёно', 'Домены', 'Серверы DNS']
             for item in data:
-                array.append(f"\nПравила DNS в DNS-прокси ({total}):\n")
-                x = PrettyTable()
-                x.field_names = ['Название', 'Описание', 'Включёно', 'Домены', 'Серверы DNS']
                 x.add_row([
                     item['name'],
                     item['description'],
                     item['enabled'],
-                    item['domains'],
-                    item['dns_servers']
+                    ", ".join(y for y in item['domains']),
+                    ", ".join(y for y in item['dns_servers'])
                 ])
-                array.append(x.get_string())
-                array.append("\n")
+            array.append(x.get_string())
+            array.append("\n")
 
         total, data = self.get_dns_static_list()
         if total:
+            array.append(f"\nСтатические записи DNS в DNS-прокси ({total}):\n")
+            x = PrettyTable()
+            x.field_names = ['Название', 'Описание', 'Включёно', 'Домен', 'IP-адреса']
             for item in data:
-                array.append(f"\nСтатические записи DNS в DNS-прокси ({total}):\n")
-                x = PrettyTable()
-                x.field_names = ['Название', 'Описание', 'Включёно', 'Домен', 'IP-адреса']
                 x.add_row([
                     item['name'],
                     item['description'],
                     item['enabled'],
                     item['domain_name'],
-                    item['ip_addresses']
+                    ", ".join(y for y in item['ip_addresses'])
                 ])
-                array.append(x.get_string())
-                array.append("\n")
+            array.append(x.get_string())
+            array.append("\n")
+
         return 0, array
 
     def export_wccp(self):
