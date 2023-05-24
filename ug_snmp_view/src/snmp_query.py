@@ -95,7 +95,6 @@ def remove_host_graph():
 
 def check_snmp(ip, community):
     result = 'timeout'
-#    status = 0
     hosts = (ip,)
     oid_group = ("1.3.6.1.2.1.1.1.0",)
     snmp_data = snmp_poller.poller(hosts, (oid_group,), community, msg_type="Get", timeout=0, retry=0)
@@ -108,13 +107,13 @@ def check_snmp(ip, community):
 def get_all_ports(ip, community):
     hosts = (ip,)
     oid = ("1.3.6.1.2.1.31.1.1.1.1",)
-    bad_ports = ("pimreg",)
+    bad_ports = ("pimreg", "pimreg2001", "dummy0", "erspan0", "gretap0", "tunl0", "gre0", "lpd0")
     snmp_data = snmp_poller.poller(hosts, (oid,), community, msg_type="GetBulk")
     all_ports = sorted([d.value.decode() for d in snmp_data if d.value.decode() not in bad_ports])
     return all_ports
 
 def get_ports(ip, community, used_ports, trafic_time):
-    status = 0
+    error = 0
     ports = {}
     if used_ports:
         hosts = (ip,)
@@ -125,12 +124,12 @@ def get_ports(ip, community, used_ports, trafic_time):
                 if d.value.decode() in used_ports:
                     ports[d.index_part] = Port(d.value.decode(), trafic_time)
         except ConnectionError:
-            status = 1
+            error = 1
         except OSError:
-            status = 2
-    if not ports:
-        status = 3
-    return status, ports
+            error = 2
+#    if not ports:
+#        status = 3
+    return error, ports
 
 def get_utm_status(ip, community):
     hosts = (ip,)
@@ -140,6 +139,29 @@ def get_utm_status(ip, community):
         '1.1.0': 'vcpuCount',
         '1.2.0': 'vcpuUsage',
         '1.3.0': 'usersCounter',
+        '1.4.0': 'sessionsCounter',
+        '1.5.0': 'tcpsessionsCounter',
+        '1.6.0': 'udpsessionsCounter',
+        '1.7.0': 'icmpsessionsCounter',
+        '1.8.0': 'sessionsRate10',
+        '1.9.0': 'sessionsRate60',
+        '1.10.0': 'sessionsRate300',
+        '1.11.0': 'tcpsessionsRate10',
+        '1.12.0': 'tcpsessionsRate60',
+        '1.13.0': 'tcpsessionsRate300',
+        '1.14.0': 'udpsessionsRate10',
+        '1.15.0': 'udpsessionsRate60',
+        '1.16.0': 'udpsessionsRate300',
+        '1.17.0': 'icmpsessionsRate10',
+        '1.18.0': 'icmpsessionsRate60',
+        '1.19.0': 'icmpsessionsRate300',
+        '1.20.0': 'dnsRequestCounter',
+        '1.21.0': 'dnsBlockedRequestCounter',
+        '1.22.0': 'dnsRequestRate',
+        '1.23.0': 'httpRequestCounter',
+        '1.24.0': 'httpBlockedRequestCounter',
+        '1.25.0': 'httpRequestRate',
+        '2.1.0': 'haStatus',
         '4.1.0': 'CpuLoad',
         '4.2.0': 'MemoryUsed',
         '4.3.0': 'LogSpace',
@@ -147,13 +169,16 @@ def get_utm_status(ip, community):
         '4.5.0': 'PowerStatus2',
         '4.6.0': 'RaidType',
         '4.7.0': 'RaidStatus',
+        '4.8.0': 'diskIOUtilization',
+        '4.9.0': 'diskIOUtilization60',
+        '4.10.0': 'diskIOUtilization300',
     }
     snmp_data = snmp_poller.poller(hosts, (oid_group,), community, msg_type="GetBulk")
     try:
         for d in snmp_data:
             if d.index_part in array:
                 data[array[d.index_part]] = d.value.decode() if d.index_part in ('4.4.0', '4.5.0', '4.6.0', '4.7.0') else d.value
-        return 0, data
+        return (0, data) if data else (4, "Not responce data")
     except ConnectionError as err:
         return 1, err
     except OSError as err:

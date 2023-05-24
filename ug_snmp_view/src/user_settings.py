@@ -24,13 +24,11 @@ def make_settings():
                     location = new_loc,
                     finalize = True,)
     window.make_modal()
-    status = 0
+    status = 1
     data = ('None', 0, '', ' ', 'null')
     while True:
         event, values = window.read()
         if event in (sg.WINDOW_CLOSED, 'Cancel'):
-            if (values['-NAME-'] in data) or (values['-IPADDR-'] in data) or (values['-COMMUNITY-'] in data):
-                status = 1
             break
         elif event == 'Save':
             if (values['-NAME-'] in data) or (values['-IPADDR-'] in data) or (values['-COMMUNITY-'] in data):
@@ -85,7 +83,7 @@ def make_ports(all_ports):
                     finalize = True,)
     window.make_modal()
 
-    status = 0
+    status = 1
     while True:
         event, values = window.read()
         if event in (sg.WINDOW_CLOSED, 'Cancel'):
@@ -137,7 +135,7 @@ def make_graphs():
                     finalize = True,)
     window.make_modal()
 
-    status = 0
+    status = 1
     while True:
         event, values = window.read()
         if event in (sg.WINDOW_CLOSED, 'Cancel'):
