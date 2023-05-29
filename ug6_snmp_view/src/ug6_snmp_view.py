@@ -67,7 +67,7 @@ def make_window():
         [sg.Text('Загрузка процессора (%):', pad=(0, 2), size=(23, 1)), sg.Text(size=(3, 1), justification='right', pad=(0, 2), key='-CpuLoad-')],
         [sg.Text('Занятая память (%):', pad=(0, 2), size=(23, 1)), sg.Text(size=(3, 1), justification='right', pad=(0, 2), key='-MemoryUsed-')],
         [sg.Text('Журналами занято (%):', pad=(0, 2), size=(23, 1)), sg.Text(size=(3, 1), justification='right', pad=(0, 2), key='-LogSpace-')],
-        [sg.Text('Используемые vCPU (%):', pad=(0, 2), size=(23, 1)), sg.Text(size=(3, 1), justification='right', pad=(0, 2), key='-VcpuUsage-')],
+        [sg.Text('Используемые vCPU:', pad=(0, 2), size=(23, 1)), sg.Text(size=(3, 1), justification='right', pad=(0, 2), key='-VcpuUsage-')],
         [sg.Text('Количество vCPU:', pad=(0, 2), size=(19, 1)), sg.Text(size=(7, 1), justification='right', pad=(0, 2), key='-VcpuCount-')],
     ]
     left_col2 = [
