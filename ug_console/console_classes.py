@@ -26,7 +26,7 @@ from PyQt6.QtGui import *
 #from PyQt6.QtCore import *
 #from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt, QObject, pyqtSignal
-from PyQt6.QtWidgets import (QTreeWidget, QTreeWidgetItem, QSizePolicy, QLabel, QWidget, QPushButton,
+from PyQt6.QtWidgets import (QTreeWidget, QTreeWidgetItem, QSizePolicy, QLabel, QWidget, QPushButton, QFrame,
                              QGroupBox, QFormLayout, QVBoxLayout, QGridLayout, QHBoxLayout, QScrollArea, QDialog,
                              QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QSplitter, QDialogButtonBox
                              )
@@ -163,14 +163,71 @@ class MainTree(QTreeWidget):
 
     def select_item(self):
         """
-        При выборе раздела в дереве, получаем выбранный раздел и его родителя. Строим путь к каталогу с конфигурацией
-        данного раздела и генерируем сигнал itemSelected, в который передаём путь. Сигнал идёт в MainWindow::tree_selected()
+        При выборе раздела в дереве, получаем выбранный раздел и его родителя. Строим путь к каталогу с конфигурацией данного раздела.
+        Получаем относительный путь к конфигурации выделенного раздела. Строим полный путь и загружаем файлы конфигурации раздела.
         """
         if self.selectedItems():
+            self.main_frame = self.parent().findChild(QObject, "main_frame")
+            self.main_frame_vbox = self.main_frame.children()[0]
+            base_path = self.main_frame.accessibleDescription()
             selected_item = self.selectedItems()[0]
             parent = selected_item.parent().text(0)
             selected_path = f"{self.over_compliances[parent]}/{self.over_compliances[selected_item.text(0)]}"
-            self.itemSelected.emit(selected_path)
+            path = f"{base_path}/{selected_path}"
+            print(path)
+
+            if not os.path.isdir(base_path):
+                new_widget = AlertLabel(f"Не найден каталог с конфигурацией\n{base_path}")
+            elif not os.path.isdir(path):
+                new_widget = AlertLabel(f"Не найден каталог\n {self.path}\n с конфигурацией этого раздела.")
+            elif selected_path == "UserGate/GeneralSettings":
+                widget = GeneralSettings(base_path, selected_path)
+                new_widget = MyScrollArea()
+                new_widget.setWidget(widget)
+            elif selected_path == "UserGate/Administrators":
+                new_widget = Administrators(path)
+            elif selected_path == "UserGate/Certificates":
+                new_widget = Certificates(path)
+            elif selected_path == "Network/Zones":
+                new_widget = Zones(path)
+            elif selected_path == "Network/Interfaces":
+                new_widget = Interfaces(path)
+            self._update_tab_settings(new_widget)
+
+    def _update_tab_settings(self, new_widget):
+        """
+        Добавляем виджет раздела в main_frame если там пусто. Если нет, то удаляем существующий виджет и затем добавляем новый.
+        """
+        print("count: ", self.main_frame_vbox.count())
+        if self.main_frame_vbox.count() == 0:
+            self.main_frame_vbox.insertWidget(0, new_widget)
+        else:
+            old_widget = self.main_frame.findChild(QObject, "section_mainwidget")
+            print(old_widget.parentWidget(), " --> ", old_widget)
+            old_widget.deleteLater()
+            self.main_frame_vbox.insertWidget(0, new_widget)
+
+
+class TitleLabels(QFrame):
+    def __init__(self, base_path):
+        super().__init__()
+        self.setObjectName("title_labels")
+        self.setFixedHeight(25)
+        self.setStyleSheet(cs.Style.Test)
+
+        with open(f"{base_path}/general_values.json", "r") as fh:
+            data = json.load(fh)
+        label2 = QLabel(f"Версия: {data['version']}")
+        label2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label3 = QLabel(f"{base_path}  ")
+        label3.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        layout = QHBoxLayout()
+        layout.addWidget(QLabel(f"  {data['node_name']}"))
+        layout.addWidget(label2)
+        layout.addWidget(label3)
+        layout.setContentsMargins(0, 2, 0, 2)
+        self.setLayout(layout)
 
 
 class AlertLabel(QWidget):
@@ -253,6 +310,7 @@ class GeneralSettings(QWidget):
         vbox.addWidget(self.box_mc)
         vbox.addWidget(self.box_updates_schedule)
         hbox = QHBoxLayout()
+        hbox.setContentsMargins(0, 0, 0, 0)
         hbox.addLayout(vbox)
         hbox.addStretch(5)
         self.setLayout(hbox)
@@ -506,10 +564,9 @@ class GeneralSettings(QWidget):
 
 
 class Administrators(QWidget):
-    def __init__(self, base_path, selected_path):
+    def __init__(self, path):
         super().__init__()
-        self.base_path = base_path
-        self.path = f"{base_path}/{selected_path}"
+        self.path = path
         self.setObjectName("section_mainwidget")
         self.setContentsMargins(0, 0, 0, 0)
         self.setStyleSheet(cs.Style.GroupBox)
@@ -546,12 +603,7 @@ class Administrators(QWidget):
         button_act.setObjectName("admin_act")
         button_box.clicked.connect(self.selected_buttons)
 
-        self.tree_1 = QTreeWidget()
-        self.tree_1.setHeaderLabels(["Имя", "Описание", "Профиль администратора"])
-        self.tree_1.setAlternatingRowColors(True)
-        self.tree_1.setSortingEnabled(True)
-        self.tree_1.sortItems(0, Qt.SortOrder.AscendingOrder)
-        self.tree_1.setStyleSheet(cs.Style.ListTree)
+        self.tree_1 = cs.MyTree(["Имя", "Описание", "Профиль администратора"], style=cs.Style.ListTree)
         try:
             with open(f"{self.path}/admins_list.json", "r") as fh:
                 data = json.load(fh)
@@ -575,7 +627,6 @@ class Administrators(QWidget):
             self.tree_1.insertTopLevelItems(0, items)
             self.tree_1.setColumnWidth(0, 160)
             self.tree_1.setColumnWidth(1, 140)
-            self.tree_1.setRootIsDecorated(False)
         self.tree_1.itemDoubleClicked.connect(self.selected_admin)
         
         vbox = QVBoxLayout()
@@ -614,12 +665,7 @@ class Administrators(QWidget):
         button_edit.setObjectName("profile_edit")
         button_box.clicked.connect(self.selected_buttons)
 
-        self.tree_2 = QTreeWidget()
-        self.tree_2.setHeaderLabels(["Название", "Описание"])
-        self.tree_2.setAlternatingRowColors(True)
-        self.tree_2.setSortingEnabled(True)
-        self.tree_2.sortItems(0, Qt.SortOrder.AscendingOrder)
-        self.tree_2.setStyleSheet(cs.Style.ListTree)
+        self.tree_2 = cs.MyTree(["Название", "Описание"], style=cs.Style.ListTree)
         try:
             with open(f"{self.path}/admin_profiles_list.json", "r") as fh:
                 data = json.load(fh)
@@ -635,7 +681,6 @@ class Administrators(QWidget):
                 items.append(item)
             self.tree_2.insertTopLevelItems(0, items)
             self.tree_2.setColumnWidth(0, 280)
-            self.tree_2.setRootIsDecorated(False)
         self.tree_2.itemDoubleClicked.connect(self.selected_item)
 
         vbox = QVBoxLayout()
@@ -652,11 +697,12 @@ class Administrators(QWidget):
         config_file: admin_profiles_list.json.json
         """
         self.box_sessions_admins = QGroupBox("Сессии администраторов")
-        tree = QTreeWidget()
-        tree.setHeaderLabels(["Логин", "Источник", "Начало", "IP-адрес"])
-        tree.setAlternatingRowColors(True)
-        tree.setSortingEnabled(True)
-        tree.setStyleSheet(cs.Style.MainTree)
+#        tree = QTreeWidget()
+#        tree.setHeaderLabels(["Логин", "Источник", "Начало", "IP-адрес"])
+#        tree.setAlternatingRowColors(True)
+#        tree.setSortingEnabled(True)
+#        tree.setStyleSheet(cs.Style.MainTree)
+        tree = cs.MyTree(["Логин", "Источник", "Начало", "IP-адрес"])
 #        try:
 #            with open(f"{self.path}/admin_profiles_list.json", "r") as fh:
 #                data = json.load(fh)
@@ -669,9 +715,9 @@ class Administrators(QWidget):
 #                item.setFlags(Qt.ItemFlag.ItemIsEnabled|Qt.ItemFlag.ItemIsSelectable)
 #                items.append(item)
 #            tree.insertTopLevelItems(0, items)
-#            tree.setColumnWidth(0, 200)
-#            tree.setColumnWidth(1, 200)
-#            tree.setColumnWidth(2, 280)
+        tree.setColumnWidth(0, 200)
+        tree.setColumnWidth(1, 200)
+        tree.setColumnWidth(2, 280)
 
         vbox = QVBoxLayout()
         vbox.addWidget(tree)
@@ -682,10 +728,9 @@ class Certificates(QWidget):
     """
     Экран "UserGate" --> "Сертификаты".
     """
-    def __init__(self, base_path, selected_path):
+    def __init__(self, path):
         super().__init__()
-        self.base_path = base_path
-        self.path = f"{base_path}/{selected_path}"
+        self.path = path
         self.setObjectName("section_mainwidget")
         self.setContentsMargins(0, 0, 0, 0)
 
@@ -696,13 +741,7 @@ class Certificates(QWidget):
         button_view.setObjectName("cert_view")
         self.button_box.clicked.connect(self.selected_buttons)
 
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Название", "Используется", "Издатель", "Субъект", "Действует с", "Истекает"])
-        self.tree.setAlternatingRowColors(True)
-        self.tree.setSortingEnabled(True)
-        self.tree.sortItems(0, Qt.SortOrder.AscendingOrder)
-        self.tree.setStyleSheet(cs.Style.ListTreeEnabledItems)
-        
+        self.tree = cs.MyTree(["Название", "Используется", "Издатель", "Субъект", "Действует с", "Истекает"], style=cs.Style.ListTreeEnabledItems)
         try:
             with open(f"{self.path}/certificates_list.json", "r") as fh:
                 data = json.load(fh)
@@ -722,7 +761,6 @@ class Certificates(QWidget):
             self.tree.setColumnWidth(2, 200)
             self.tree.setColumnWidth(3, 200)
             self.tree.setColumnWidth(4, 140)
-            self.tree.setRootIsDecorated(False)
         self.tree.itemDoubleClicked.connect(self.selected_item)
 
         vbox = QVBoxLayout()
@@ -746,3 +784,145 @@ class Certificates(QWidget):
         dc.CertSettings(self.tree, self.path, item.text(0))()
 
 
+class Zones(QWidget):
+    """
+    Экран "Сеть" --> "Зоны".
+    """
+    def __init__(self, path):
+        super().__init__()
+        self.path = path
+        self.setObjectName("section_mainwidget")
+        self.setContentsMargins(0, 0, 0, 0)
+
+        self.button_box = QDialogButtonBox()
+        button_edit = self.button_box.addButton("Редактировать", QDialogButtonBox.ButtonRole.ActionRole)
+        button_edit.setObjectName("zone_edit")
+        self.button_box.clicked.connect(self.selected_buttons)
+
+        self.tree = cs.MyTree(["Имя зоны", "Защита от DoS включена для", "Защита от спуфинга", "Контроль доступа"], style=cs.Style.ListTreeEnabledItems)
+        try:
+            with open(f"{self.path}/config_zones.json", "r") as fh:
+                data = json.load(fh)
+        except Exception as err:
+            cs.message_alert(self, err, f"Проблема с файлом:\n {self.path}/config_zones.json")
+        else:
+            items = []
+            for value in data:
+                dos = self.get_protect_dos(value['dos_profiles'])
+                antispoof = self.get_protect_spoof(value)
+                services_access = self.get_services_access(value['services_access'])
+                item = QTreeWidgetItem([value['name'], dos, antispoof, services_access])
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled|Qt.ItemFlag.ItemIsSelectable)
+                items.append(item)
+            self.tree.insertTopLevelItems(0, items)
+            self.tree.setColumnWidth(0, 180)
+            self.tree.setColumnWidth(1, 200)
+            self.tree.setColumnWidth(2, 200)
+        self.tree.itemDoubleClicked.connect(self.selected_item)
+
+        vbox = QVBoxLayout()
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.addWidget(self.button_box)
+        vbox.addWidget(self.tree)
+        self.setLayout(vbox)
+
+    def get_protect_dos(self, dos_profiles):
+        result = ", ".join([x['kind'].upper() for x in dos_profiles if x['enabled']])
+        return result if result else "Ничего"
+
+    def get_protect_spoof(self, spoof_data):
+        if not spoof_data['enable_antispoof']:
+            return "Отключено"
+        else:
+            result = "Включено, адреса:\n"
+            if not spoof_data['networks']:
+                result += "Локальные адреса зоны"
+            else:
+                if spoof_data['antispoof_invert']:
+                    for x in spoof_data['networks']:
+                       result += "\u0336" + '\u0336'.join(x) + "\u0336\n"
+                else:
+                    result += "\n".join(spoof_data['networks'])
+            return result.rstrip()
+
+    def get_services_access(self, services_access):
+        result = ", ".join([cs.zone_services[x['service_id']] for x in services_access if x['enabled']])
+        return result if result else "Всё отключено"
+
+    def selected_buttons(self, event):
+        try:
+            zone_name = self.tree.selectedItems()[0].text(0)
+        except IndexError:
+            cs.message_inform(self, "Ошибка!", "Не выбрана зона для просмотра.")
+        else:
+            if event.objectName() == "zone_edit":
+                dc.ZoneSettings(self.tree, self.path, zone_name)()
+
+    def selected_item(self, item, col):
+        dc.ZoneSettings(self.tree, self.path, item.text(0))()
+
+
+class Interfaces(QWidget):
+    """
+    Экран "Сеть" --> "Интерфейсы".
+    """
+    def __init__(self, path):
+        super().__init__()
+        self.path = path
+        self.setObjectName("section_mainwidget")
+        self.setContentsMargins(0, 0, 0, 0)
+
+        self.button_box = QDialogButtonBox()
+        button_edit = self.button_box.addButton("Редактировать", QDialogButtonBox.ButtonRole.ActionRole)
+        button_edit.setObjectName("iface_edit")
+        self.button_box.clicked.connect(self.selected_buttons)
+
+        self.tree = cs.MyTree(["Тип", "Название", "Режим", "IP интерфейса", "MAC-адрес", "Зона", "MTU", "DHCP-релей", "Интерфейсы",
+                               "Тип интерфейса", "Виртуальный маршрутизатор", "Профиль netflow"], style=cs.Style.ListTree)
+        try:
+            with open(f"{self.path}/config_interfaces.json", "r") as fh:
+                data = json.load(fh)
+        except Exception as err:
+            cs.message_alert(self, err, f"Проблема с файлом:\n {self.path}/config_interfaces.json")
+        else:
+            items = []
+            cluster = QTreeWidgetItem(["Узел кластера: cluster"])
+            for value in data:
+                if value['kind'] == "vpn":
+                    mode = "Статический" if value['mode'] == "static" else "Динамический"
+                    ip = "\n".join(value['ipv4'])
+                    zone = value['zone_id'] if value['zone_id'] else "---"
+                    netflow_profile = "---" if value['netflow_profile'] == "undefined" else value['netflow_profile']
+                    item = QTreeWidgetItem(["VPN", value['name'], mode, ip, "", zone, str(value['mtu']), "", "", "Layer 3", "", netflow_profile])
+                    item.setFlags(Qt.ItemFlag.ItemIsEnabled|Qt.ItemFlag.ItemIsSelectable)
+                    items.append(item)
+
+#                    dhcp_relay = "\n".join(value['dhcp_relay']['servers'])
+
+            self.tree.insertTopLevelItems(0, items)
+            self.tree.setColumnWidth(0, 180)
+            self.tree.setColumnWidth(1, 160)
+            self.tree.setColumnWidth(2, 200)
+            self.tree.setColumnWidth(3, 200)
+            self.tree.setColumnWidth(4, 140)
+        self.tree.itemDoubleClicked.connect(self.selected_item)
+
+        vbox = QVBoxLayout()
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.addWidget(self.button_box)
+        vbox.addWidget(self.tree)
+        self.setLayout(vbox)
+
+    def selected_buttons(self, event):
+        try:
+            sert_name = self.tree.selectedItems()[0].text(0)
+        except IndexError:
+            cs.message_inform(self, "Ошибка!", "Не выбран сертификат.")
+        else:
+            if event.objectName() == "cert_edit":
+                dc.CertSettings(self.tree, self.path, sert_name)()
+            elif event.objectName() == "cert_view":
+                dc.CertView(self.tree, self.path, sert_name)()
+
+    def selected_item(self, item, col):
+        dc.CertSettings(self.tree, self.path, item.text(0))()

@@ -24,7 +24,7 @@
 from enum import Enum
 from datetime import datetime as dt
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QLabel, QSpinBox, QMessageBox
+from PyQt6.QtWidgets import QLabel, QSpinBox, QMessageBox, QTreeWidget, QLineEdit
 
 
 appointment = {
@@ -33,6 +33,40 @@ appointment = {
     "reverseproxy_rules": "Правила reverse-прокси",
     "webui": "SSL веб-консоли"
 }
+
+zone_services = {
+    1: "Ping",
+    2: "SNMP",
+    3: False,
+    4: "Captive-портал и страница блокировки",
+    5: "XML-RPC для управления",
+    6: "Кластер",
+    7: "VRRP",
+    8: "Консоль администрирования",
+    9: "DNS",
+    10: "HTTP(S)-прокси",
+    11: "Агент авторизации",
+    12: "SMTP(S)-прокси",
+    13: "POP(S)-прокси",
+    14: "CLI по SSH",
+    15: "VPN",
+    16: False,
+    17: "SCADA",
+    18: "Reverse-прокси",
+    19: "Веб-портал",
+    20: False,
+    21: False,
+    22: "SAML сервер",
+    23: "Log analyzer",
+    24: "OSPF",
+    25: "BGP",
+    26: "SNMP-прокси",
+    27: "SSH- прокси",
+    28: "Multicast",
+    29: "NTP сервис",
+    30: "RIP",
+}
+
 
 class Color(str, Enum):
     ALARM = "darkred"
@@ -45,8 +79,11 @@ class Color(str, Enum):
 
 class Style(str, Enum):
     Test = ("""
-        QWidget {
-            background: yllow;
+        * {
+            background-color: #2690c8;
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
         }
     """)
     GroupBox = ("""
@@ -119,6 +156,18 @@ class SelectLabel(QLabel):
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
 
+class LineEdit(QLineEdit):
+    def __init__(self, value, frame=True, read_only=False):
+        super().__init__(value)
+        self.setText(value)
+        self.setFrame(frame)
+        self.setStyleSheet(Style.LineEdit)
+        self.setReadOnly(read_only)
+
+#    def mousePressEvent(self, event):
+#        print("Clicked:", event)
+
+
 class SpinBox(QSpinBox):
     def __init__(self, value, min_length=0, max_length=100, frame=True, enabled=True):
         super().__init__()
@@ -128,6 +177,17 @@ class SpinBox(QSpinBox):
         self.setWrapping(True)
         self.setEnabled(enabled)
         self.setFrame(frame)
+
+
+class MyTree(QTreeWidget):
+    def __init__(self, value, sorting=True, style=None, root_decor=False):
+        super().__init__()
+        self.setHeaderLabels(value)
+        self.setAlternatingRowColors(True)
+        self.setSortingEnabled(sorting)
+        self.sortItems(0, Qt.SortOrder.AscendingOrder)
+        self.setRootIsDecorated(root_decor)
+        self.setStyleSheet(style)
 
     
 class EventTracker():

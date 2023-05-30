@@ -20,8 +20,8 @@
 # with this program; if not, contact the site <https://www.gnu.org/licenses/>.
 #
 #--------------------------------------------------------------------------------------------------- 
-# Версия 2.21
-# Программа предназначена для переноса конфигурации с UTM версии 5 на версию 6
+# Версия 3.0
+# Программа предназначена для переноса конфигурации с UTM версии 5 и 6 на версии 6 и 7
 # или между устройствами 6-ой версии.
 #
 import os, sys
@@ -38,6 +38,7 @@ class UTM(UtmXmlRpc):
         self._categories = {}           # Список Категорий URL {id: name} для экспорта и {name: id} для импорта
         self.zones = {}                 # Список зон {id: name} для экспорта и {name: id} для импорта
         self.services = {}              # Список сервисов раздела библиотеки {id: name} для экспорта и {name: id} для импорта
+        self.services_groups = {}       # Список групп сервисов раздела библиотеки {id: name} для экспорта и {name: id} для импорта
         self.shaper = {}                # Список полос пропускания раздела библиотеки {name: id}
         self.list_morph = {}            # Списки морфлолгии раздела библиотеки {name: id}
         self.list_IP = {}               # Списки IP-адресов раздела библиотеки {id: name} для экспорта и {name: id} для импорта
@@ -87,11 +88,15 @@ class UTM(UtmXmlRpc):
         try:
             result = self._server.v2.core.get.categories()
             self._categories = {x['id']: x['name'] for x in result}
+
+            if int(self.version[:1]) > 6:
+                result = self._server.v2.nlists.list(self._auth_token, 'servicegroup', 0, 1000, {})
+                self.services_groups = {x['id']: x['name'] for x in result['items'] if result['count']}
             
             result = self._server.v2.core.get.l7categories(self._auth_token, 0, 10000, '')
             self.l7_categories = {x['id']: x['name'] for x in result['items'] if result['count']}
             
-            if self.version.startswith('6'):
+            if int(self.version[:1]) > 5:
                 result = self._server.v2.core.get.l7apps(self._auth_token, 0, 10000, {}, [])
             else:
                 result = self._server.v2.core.get.l7apps(self._auth_token, 0, 10000, '')
@@ -141,6 +146,9 @@ class UTM(UtmXmlRpc):
         total, data = self.get_zones_list()
         self.zones = {x['id']: x['name'] for x in data if total}
 
+        total, data = self.get_shaper_list()
+        self.shaper = {x['id']: x['name'] for x in data if total}
+
         total, data = self.get_services_list()
         self.services = {x['id']: x['name'] for x in data['items'] if total}
 
@@ -175,6 +183,10 @@ class UTM(UtmXmlRpc):
             result = self._server.v2.core.get.categories()
             self._categories = {x['name']: x['id'] for x in result}
 
+            if int(self.version[:1]) > 6:
+                result = self._server.v2.nlists.list(self._auth_token, 'servicegroup', 0, 1000, {})
+                self.services_groups = {x['name']: x['id'] for x in result['items'] if result['count']}
+
             result = self._server.v1.libraries.services.list(self._auth_token, 0, 1000, {}, [])
             self.services = {x['name']: x['id'] for x in result['items'] if result['total']}
 
@@ -205,11 +217,8 @@ class UTM(UtmXmlRpc):
             result = self._server.v2.core.get.l7categories(self._auth_token, 0, 10000, '')
             self.l7_categories = {x['name']: x['id'] for x in result['items'] if result['count']}
             
-            if self.version.startswith('6'):
-                result = self._server.v2.core.get.l7apps(self._auth_token, 0, 10000, {}, [])
-            else:
-                result = self._server.v2.core.get.l7apps(self._auth_token, 0, 10000, '')
-            self.l7_apps = {x['name']: x['id'] if 'id' in x.keys() else x['app_id'] for x in result['items'] if result['count']}
+            result = self._server.v2.core.get.l7apps(self._auth_token, 0, 10000, {}, [])
+            self.l7_apps = {x['name']: x['id'] for x in result['items'] if result['count']}
 
             result = self._server.v1.notification.profiles.list(self._auth_token)
             self.list_notifications = {x['name']: x['id'] for x in result}
@@ -361,7 +370,7 @@ class UTM(UtmXmlRpc):
         _, data = self.get_services_list()
 
         for item in data['items']:
-            item.pop('id')
+#            item.pop('id')
             item.pop('guid')
             item.pop('cc', None)
             item.pop('readonly', None)
@@ -402,6 +411,89 @@ class UTM(UtmXmlRpc):
             else:
                 self.services[item['name']] = result
                 print(f'\tСервис "{item["name"]}" добавлен.')
+
+    def export_services_groups(self):
+        """Выгрузить группы сервисов раздела библиотеки. Только для версии 7 и выше"""
+        if int(self.version[:1]) < 7:
+            return
+        
+        print('Выгружаются группы сервисов раздела "Библиотеки":')
+        if os.path.isdir('data/Libraries/ServicesGroups'):
+            for file_name in os.listdir('data/Libraries/ServicesGroups'):
+                os.remove(f"data/Libraries/ServicesGroups/{file_name}")
+        else:
+            os.makedirs('data/Libraries/ServicesGroups')
+
+        _, data = self.get_nlist_list('servicegroup')
+
+        if not data:
+            print("\tНет групп сервисов для зкспорта.")
+            return
+
+        trans_table = str.maketrans(character_map)
+
+        for item in data:
+            item.pop('id')
+            item.pop('guid')
+            item.pop('editable')
+            item.pop('enabled')
+            item.pop('version')
+            item.pop('last_update')
+            item['name'] = item['name'].translate(trans_table)
+            for content in item['content']:
+                content.pop('id')
+                content.pop('guid')
+            with open(f"data/Libraries/ServicesGroups/{item['name']}.json", "w") as fd:
+                json.dump(item, fd, indent=4, ensure_ascii=False)
+            print(f'\tГруппа сервисов "{item["name"]}" выгружена в файл "data/Libraries/ServicesGroups/{item["name"]}.json".')
+
+    def import_services_groups(self):
+        """Импортировать группы сервисов адресов"""
+        if int(self.version[:1]) < 7:
+            return
+        
+        print('Импорт групп сервисов раздела "Библиотеки":')
+        if os.path.isdir('data/Libraries/ServicesGroups'):
+            files_list = os.listdir('data/Libraries/ServicesGroups')
+            if files_list:
+                for file_name in files_list:
+                    try:
+                        with open(f"data/Libraries/ServicesGroups/{file_name}", "r") as fh:
+                            services_group = json.load(fh)
+                    except FileNotFoundError as err:
+                        print(f'\t\033[31mГруппа сервисов не импортирована!\n\tНе найден файл "data/Libraries/ServicesGroups/{file_name}" с сохранённой конфигурацией!\033[0;0m')
+                        return
+
+                    content = services_group.pop('content')
+                    err, result = self.add_nlist(services_group)
+                    if err == 1:
+                        print(result, end= ' - ')
+                        result = self.services_groups[services_group['name']]
+                        err1, result1 = self.update_nlist(result, services_group)
+                        if err1 != 0:
+                            print("\n", f"\033[31m{result1}\033[0m")
+                        else:
+                            print("\033[32mUpdated!\033[0;0m")
+                    elif err == 2:
+                        print(f"\033[31m{result}\033[0m")
+                        continue
+                    else:
+                        self.services_groups[services_group['name']] = result
+                        print(f'\tДобавлена группа сервисов: "{services_group["name"]}".')
+                    if content:
+                        err2, result2 = self.add_nlist_items(result, content)
+                        if err2 in (1, 3):
+                            print(result2)
+                        elif err2 == 2:
+                            print(f"\033[31m{result2}\033[0m")
+                        else:
+                            print(f'\tСодержимое группы сервисов "{services_group["name"]}" обновлено. Added {result2} record.')
+                    else:
+                        print(f'\tСписок "{services_group["name"]}" пуст.')
+            else:
+                print("\033[33m\tНет групп сервисов для импорта.\033[0m")
+        else:
+            print("\033[33m\tНет групп сервисов для импорта.\033[0m")
 
     def export_IP_lists(self):
         """Выгружает списки IP-адресов и преобразует формат атрибутов списков к версии 6"""
@@ -759,6 +851,7 @@ class UTM(UtmXmlRpc):
     def import_shaper(self):
         """Импортировать список Полос пропускания раздела библиотеки"""
         print('Импорт списка "Полосы пропускания" раздела "Библиотеки":')
+
         try:
             with open("data/Libraries/BandwidthPools/config_shaper.json", "r") as fh:
                 data = json.load(fh)
@@ -769,6 +862,7 @@ class UTM(UtmXmlRpc):
         if not data:
             print("\tНет полос пропускания для импорта.")
             return
+
         for item in data:
             err, result = self.add_shaper(item)
             if err == 1:
@@ -786,43 +880,45 @@ class UTM(UtmXmlRpc):
 
     def export_scada_list(self):
         """Выгрузить список профилей АСУ ТП раздела библиотеки"""
-        print('Выгружается список "Профили АСУ ТП" раздела "Библиотеки":')
-        if not os.path.isdir('data/Libraries/SCADAProfiles'):
-            os.makedirs('data/Libraries/SCADAProfiles')
+        if int(self.version[:1]) < 7:
+            print('Выгружается список "Профили АСУ ТП" раздела "Библиотеки":')
+            if not os.path.isdir('data/Libraries/SCADAProfiles'):
+                os.makedirs('data/Libraries/SCADAProfiles')
 
-        _, data = self.get_scada_list()
+            _, data = self.get_scada_list()
 
-        for item in data:
-            item.pop('id')
-            item.pop('cc', None)
-        with open("data/Libraries/SCADAProfiles/config_scada.json", "w") as fh:
-            json.dump(data, fh, indent=4, ensure_ascii=False)
-        print(f'\tСписок "Профили АСУ ТП" выгружен в файл "data/Libraries/SCADAProfiles/config_scada.json".')
+            for item in data:
+                item.pop('id')
+                item.pop('cc', None)
+            with open("data/Libraries/SCADAProfiles/config_scada.json", "w") as fh:
+                json.dump(data, fh, indent=4, ensure_ascii=False)
+            print(f'\tСписок "Профили АСУ ТП" выгружен в файл "data/Libraries/SCADAProfiles/config_scada.json".')
 
     def import_scada_list(self):
         """Импортировать список профилей АСУ ТП раздела библиотеки"""
-        print('Импорт списка "Профили АСУ ТП" раздела "Библиотеки":')
-        try:
-            with open("data/Libraries/SCADAProfiles/config_scada.json", "r") as fh:
-                scada = json.load(fh)
-        except FileNotFoundError as err:
-            print(f'\t\033[31mСписок "Профили АСУ ТП" не импортирован!\n\tНе найден файл "data/Libraries/SCADAProfiles/config_scada.json" с сохранённой конфигурацией!\033[0;0m')
-            return
+        if int(self.version[:1]) < 7:
+            print('Импорт списка "Профили АСУ ТП" раздела "Библиотеки":')
+            try:
+                with open("data/Libraries/SCADAProfiles/config_scada.json", "r") as fh:
+                    scada = json.load(fh)
+            except FileNotFoundError as err:
+                print(f'\t\033[31mСписок "Профили АСУ ТП" не импортирован!\n\tНе найден файл "data/Libraries/SCADAProfiles/config_scada.json" с сохранённой конфигурацией!\033[0;0m')
+                return
 
-        for item in scada:
-            err, result = self.add_scada(item)
-            if err == 1:
-                print(result, end= ' - ')
-                err1, result1 = self.update_scada(self.list_scada[item['name']], item)
-                if err1 != 0:
-                    print("\n", f"\033[31m{result1}\033[0m")
+            for item in scada:
+                err, result = self.add_scada(item)
+                if err == 1:
+                    print(result, end= ' - ')
+                    err1, result1 = self.update_scada(self.list_scada[item['name']], item)
+                    if err1 != 0:
+                        print("\n", f"\033[31m{result1}\033[0m")
+                    else:
+                        print("\033[32mOk!\033[0;0m")
+                elif err == 2:
+                    print(f"\033[31m{result}\033[0m")
                 else:
-                    print("\033[32mOk!\033[0;0m")
-            elif err == 2:
-                print(f"\033[31m{result}\033[0m")
-            else:
-                self.list_scada[item['name']] = result
-                print(f'\tПрофиль АСУ ТП "{item["name"]}" добавлен.')
+                    self.list_scada[item['name']] = result
+                    print(f'\tПрофиль АСУ ТП "{item["name"]}" добавлен.')
 
     def export_templates_list(self):
         """
@@ -909,6 +1005,7 @@ class UTM(UtmXmlRpc):
             item['name'] = group_name_revert.get(item['name'], item['name'])
             if self.version.startswith('5'):
                 item['guid'] = self.default_url_category.get(item['name'], item['guid'])
+                item['attributes'] = {}
             for content in item['content']:
                 content.pop('id')
                 if self.version.startswith('5'):
@@ -1036,13 +1133,12 @@ class UTM(UtmXmlRpc):
             item.pop('url', None)
             item.pop('version', None)
             item.pop('last_update', None)
+            if self.version.startswith('5'):
+                item['attributes'] = {}
             for content in item['content']:
                 content.pop('id')
-                content['value'] = self.l7_apps.get(content['value'], content['value'])
-                if content['value'] == '1С':
-                    content['value'] = '1C'   # Ставим английскую букву
-                elif content['value'] == 'Facebook Chat':
-                    content['value'] = 'Facebook  Chat'     # Добавляем лишний пробел
+                if self.version.startswith('5'):
+                    content['name'] = self.l7_apps[content['value']]
 
         with open("data/Libraries/Applications/config_applications.json", "w") as fd:
             json.dump(data, fd, indent=4, ensure_ascii=False)
@@ -1061,6 +1157,9 @@ class UTM(UtmXmlRpc):
         if not data:
             print("\tНет групп приложений для импорта.")
             return
+
+        l7_app_id = {x for x in self.l7_apps.values()}
+
         for item in data:
             content = item.pop('content')
             err, result = self.add_nlist(item)
@@ -1072,14 +1171,17 @@ class UTM(UtmXmlRpc):
                 self.list_applicationgroup[item['name']] = result
                 print(f'\tГруппа приложений "{item["name"]}" добавлена.')
                 for app in content:
-                    try:
-                        err2, result2 = self.add_nlist_item(result, self.l7_apps[app['value']])
+                    if app['value'] in l7_app_id:
+                        if int(self.version[:1]) > 6:
+                            err2, result2 = self.add_nlist_item(result, app)
+                        else:
+                            err2, result2 = self.add_nlist_item(result, app['value'])
                         if err2 != 0:
                             print(f'\033[31m{result2}\033[0m')
                         else:
-                            print(f'\t\tДобавлено приложение: "{app["value"]}".')
-                    except:
-                        print(f'\t\t\033[33mПриложение "{app["value"]}" не будет добавлено, так как не существует на целевой системе.\033[0m')
+                            print(f'\t\tДобавлено приложение: "{app["name"]}".')
+                    else:
+                        print(f'\t\t\033[33mПриложение "{app["name"]}" не будет добавлено, так как не существует на целевой системе.\033[0m')
 
     def export_nlist_groups(self, list_type):
         """Выгружает списки: "Почтовые адреса", "Номера телефонов" и преобразует формат списков к версии 6"""
@@ -1210,7 +1312,7 @@ class UTM(UtmXmlRpc):
                 idps[item['name']] = result
                 print(f'\tПрофиль СОВ "{item["name"]}" добавлен.')
 
-            if int(self.version[6:11]) >= 10709:
+            if  int(self.version[:1]) > 6 or int(self.version[6:11]) >= 10709:
                 for signature in content:
                     if 'value' not in signature.keys():
                         print(f'\t\t\033[33mСигнатуры для данного профиля не будут добавлены так как формат не соответствует целевой системе.\033[0m')
@@ -1314,7 +1416,7 @@ class UTM(UtmXmlRpc):
 
     def export_ssl_profiles_list(self):
         """Выгрузить список профилей SSL раздела библиотеки"""
-        if self.version.startswith('6'):
+        if int(self.version[:1]) > 5:
             print('Выгружается список "Профили SSL" раздела "Библиотеки":')
             if not os.path.isdir('data/Libraries/SSLProfiles'):
                 os.makedirs('data/Libraries/SSLProfiles')
@@ -1372,7 +1474,7 @@ class UTM(UtmXmlRpc):
         else:
             data['webui_auth_mode'] = webui_auth_mode
 
-        if self.version.startswith('6'):
+        if int(self.version[:1]) > 5:
             _, result = self.get_ssl_profiles_list()
             ssl_profiles = {x['id']: x['name'] for x in result}
             data['web_console_ssl_profile_id'] = ssl_profiles[data['web_console_ssl_profile_id']]
@@ -1408,11 +1510,12 @@ class UTM(UtmXmlRpc):
             data.pop('response_pages_ssl_profile_id', None)
 
         for key, value in data.items():
-            err, result = self.set_settings_param(key, value)
-            if err == 2:
-                print(f"\033[31m{result}\033[0m")
-            else:
-                print(f'\t{params[key]} - \033[32mUpdated!\033[0m.')
+            if key != 'webui_auth_mode':
+                err, result = self.set_settings_param(key, value)
+                if err == 2:
+                    print(f"\033[31m{result}\033[0m")
+                else:
+                    print(f'\t{params[key]} - \033[32mUpdated!\033[0m.')
 
     def export_ntp(self):
         """Выгрузить настройки NTP"""
@@ -1622,7 +1725,7 @@ class UTM(UtmXmlRpc):
 
         _, data = self.get_proxyportal_config()
 
-        if self.version.startswith('6'):
+        if int(self.version[:1]) > 5:
             _, result = self.get_ssl_profiles_list()
             ssl_profiles = {x['id']: x['name'] for x in result}
             data['ssl_profile_id'] = ssl_profiles[data['ssl_profile_id']]
@@ -1710,11 +1813,20 @@ class UTM(UtmXmlRpc):
         if not data:
             print("\tНет профилей администраторов для импорта.")
             return
+            
+        webui = {'page_routes', 'page_ospf', 'page_bgp', 'page_byod_devices', 'page_byod_policies', 'page_scada_profiles', 'page_scada_rules'}
+        xmlrpc = {'stat',}
 
         _, result = self.get_admin_profiles_list()
         admin_profiles = {x['name']: x['id'] for x in result}
 
         for item in data:
+            if int(self.version[:1]) > 6:
+                webui_permissions = [x for x in item['webui_permissions'] if x[0] not in webui]
+                item['webui_permissions'] = webui_permissions
+                xmlrpc_permissions = [x for x in item['xmlrpc_permissions'] if x[0] not in xmlrpc]
+                item['xmlrpc_permissions'] = xmlrpc_permissions
+        
             if item['name'] in admin_profiles:
                 print(f'\tПрофиль администраторов "{item["name"]}" уже существует', end= ' - ')
                 err, result = self.update_admin_profile(admin_profiles[item['name']], item)
@@ -1774,12 +1886,9 @@ class UTM(UtmXmlRpc):
             item.pop('guid', None)
             item.pop('cc', None)
             item['profile_id'] = admin_profiles.get(item['profile_id'], -1)
-            if item['type'] == 'ldap_user':
-                i = item['login'].find('(')
-                item['login'] = item['login'][i+1:len(item['login'])-1]
-            elif item['type'] == 'ldap_group':
+            if int(self.version[:1]) < 7 and item['type'] == 'ldap_group':
                 group_name = [x.split('=') for x in item['login'].split(',')]
-                item['login'] = f'{group_name[-2][1]}.{group_name[-1][1]}\{group_name[0][1]}'
+                item['login'] = f'{group_name[0][1]} ({group_name[-2][1]}.{group_name[-1][1]}\{group_name[0][1]})'
 
         with open("data/UserGate/Administrators/admins_list.json", "w") as fh:
             json.dump(data, fh, indent=4, ensure_ascii=False)
@@ -1802,19 +1911,25 @@ class UTM(UtmXmlRpc):
 
         for item in data:
             item['profile_id'] = admin_profiles.get(item['profile_id'], -1)
-
+            if int(self.version[:1]) < 7 and item['type'] == "auth_profile":
+                print(f'\t\033[36mАдминистратор "{item["login"]}" не добавлен так как тип аутентификации auth_profile не поддерживается версией ниже 7.\033[0m')
+                continue
             if item['login'] in admins_list:
-                print(f'\tАдминистратор "{item["login"]}" уже существует', end= ' - ')
-                err, result = self.update_admin(admins_list[item['login']], item)
-                if err == 2:
-                    print("\n", f"\033[31m{result}\033[0m")
+                if int(self.version[:1]) > 6 and item['login'] == "Admin":
+                    continue
                 else:
-                    print("\033[32mUpdated!\033[0;0m")
+                    print(f'\tАдминистратор "{item["login"]}" уже существует', end= ' - ')
+                    err, result = self.update_admin(admins_list[item['login']], item)
+                    if err == 2:
+                        print("\n", f"\033[31m{result}\033[0m")
+                    else:
+                        print("\033[32mUpdated!\033[0;0m")
             else:
                 if item['type'] == 'local':
                     item['password'] = 'utm'
                 elif item['type'] in ('ldap_user', 'ldap_group'):
-                    domain, name = item['login'].split('\\')
+                    i = item['login'].find('(')
+                    domain, name = item['login'][i+1:len(item['login'])-1].split('\\')
                     if item['type'] == 'ldap_user':
                         err, guid = self.get_ldap_user_guid(domain, name)
                     else:
@@ -1868,10 +1983,10 @@ class UTM(UtmXmlRpc):
         for item in data:
             _, users = self.get_group_users(item['guid'])
             item.pop('cc', None)
-            if self.version.startswith('6'):
-                item['users'] = [x[1] for x in users]
-            else:
+            if self.version.startswith('5'):
                 item['users'] = [x['name'] for x in users]
+            else:
+                item['users'] = [x[1] for x in users]
 
         with open(f"data/UsersAndDevices/Groups/config_groups.json", "w") as fd:
             json.dump(data, fd, indent=4, ensure_ascii=False)
@@ -1905,20 +2020,21 @@ class UTM(UtmXmlRpc):
                 print(f'\tЛокальная группа "{item["name"]}" добавлена.')
 
             for user_name in users:
-                i = user_name.partition("\\")
-                if i[2]:
-                    err, result = self.get_ldap_user_guid(i[0], i[2])
+                user_array = user_name. split(' ')
+                if len(user_array) > 1:
+                    domain, name = user_array[1][1:len(user_array[1])-1].split('\\')
+                    err, result = self.get_ldap_user_guid(domain, name)
                     if err != 0:
                         print(f"\033[31m{result}\033[0m")
                         break
                     elif not result:
-                        print(f'\t\033[31mНет LDAP-коннектора для домена "{i[0]}"!\n\tИмпортируйте и настройте LDAP-коннектор. Затем повторите импорт групп.\033[0m')
+                        print(f'\t\033[31mНет LDAP-коннектора для домена "{domain}"!\n\tИмпортируйте и настройте LDAP-коннектор. Затем повторите импорт групп.\033[0m')
                         break
                     err2, result2 = self.add_user_in_group(self.list_groups[item['name']], result)
                     if err2 != 0:
                         print(f"\033[31m{result2}\033[0m")
                     else:
-                        print(f'\t\tПользователь "{user_name}" добавлен в группу.')
+                        print(f'\t\tПользователь "{user_name}" добавлен в группу "{item["name"]}".')
 
     def export_users_lists(self):
         """Выгружает список локальных пользователей"""
@@ -1953,7 +2069,12 @@ class UTM(UtmXmlRpc):
             return
 
         for item in users:
-            item['groups'] = [self.list_groups[name] for name in item['groups']]
+            try:
+                item['groups'] = [self.list_groups[name] for name in item['groups']]
+            except KeyError as err:
+                print(f'\t\033[31mНе найдена группа {err} для пользователя {item["name"]}. {item["name"]} не импортирован.\033[0;0m')
+                print(f'\t\033[36m\tИмпортируйте список групп и повторите импорт пользователей.\033[0;0m')
+                continue
             err, result = self.add_user(item)
             if err == 1:
                 print(result, end= ' - ')
@@ -2177,7 +2298,7 @@ class UTM(UtmXmlRpc):
             'radius': 'radius_server_id',
             'tacacs_plus': 'tacacs_plus_server_id',
             'ntlm': 'ntlm_server_id',
-            'saml_idp': 'saml_idp_server_id' if self.version.startswith('6') else 'saml_idp_server'
+            'saml_idp': 'saml_idp_server_id' if int(self.version[:1]) > 5 else 'saml_idp_server'
         }
         name = auth_type[method['type']]
         try:
@@ -2377,6 +2498,7 @@ class UTM(UtmXmlRpc):
             err, result = self.add_captive_portal_rules(item)
             if err == 1:
                 print(result, end= ' - ')
+                item.pop('position', None)
                 err1, result1 = self.update_captive_portal_rule(item)
                 if err1 != 0:
                     print("\n", f"\033[31m{result1}\033[0m")
@@ -2389,6 +2511,9 @@ class UTM(UtmXmlRpc):
 
     def export_byod_policy(self):
         """Выгрузить список Политики BYOD"""
+        if self.version.startswith('7'):
+            return
+
         print('Выгружается список "Политики BYOD" раздела "Пользователи и устройства":')
         if not os.path.isdir('data/UsersAndDevices/BYODPolicies'):
             os.makedirs('data/UsersAndDevices/BYODPolicies')
@@ -2408,6 +2533,9 @@ class UTM(UtmXmlRpc):
 
     def import_byod_policy(self):
         """Импортировать список Политики BYOD"""
+        if self.version.startswith('7'):
+            return
+
         print('Импорт списка "Политики BYOD" раздела "Пользователи и устройства":')
         try:
             with open("data/UsersAndDevices/BYODPolicies/config_byod_policy.json", "r") as fh:
@@ -2438,6 +2566,7 @@ class UTM(UtmXmlRpc):
             else:
                 print(f'\tПравило BYOD "{item["name"]}" добавлено.')
 
+####################################### Политики сети  #####################################
     def export_firewall_rules(self):
         """Выгрузить список правил межсетевого экрана"""
         print('Выгружается список "Межсетевой экран" раздела "Политики сети":')
@@ -2467,7 +2596,7 @@ class UTM(UtmXmlRpc):
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
             self.set_time_restrictions(item)
-            item['services'] = [self.services[x] for x in item['services']]
+            item['services'] = self.get_services(item['name'], item['services'])
             self.get_apps(item['apps'])
 
         with open("data/NetworkPolicies/Firewall/config_firewall_rules.json", "w") as fd:
@@ -2492,6 +2621,8 @@ class UTM(UtmXmlRpc):
         self.firewall_rules = {x['name']: x['id'] for x in firewall if total}
 
         for item in data:
+            item.pop('time_created', None)
+            item.pop('time_updated', None)
             if item['scenario_rule_id']:
                 try:
                     item['scenario_rule_id'] = self.scenarios_rules[item['scenario_rule_id']]
@@ -2502,11 +2633,10 @@ class UTM(UtmXmlRpc):
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
             self.set_time_restrictions(item)
-            try:
-                item['services'] = [self.services[x] for x in item['services']]
-            except KeyError as err:
-                print(f'\t\033[33mНе найден сервис {err} для правила "{item["name"]}".\n\tЗагрузите сервисы и повторите попытку.\033[0m')
-                item['services'] = []
+            if int(self.version[:1]) == 6:
+                item['services'] = self.get_services_for_v6(item['name'], item['services'])
+            else:
+                item['services'] = self.get_services(item['name'], item['services'])
             try:
                 self.get_apps(item['apps'])
             except KeyError as err:
@@ -2545,15 +2675,11 @@ class UTM(UtmXmlRpc):
             item['log_session_start'] = True
             if item['scenario_rule_id']:
                 item['scenario_rule_id'] = self.scenarios_rules[item['scenario_rule_id']]
-            if self.version.startswith('6'):
+            if int(self.version[:1]) > 5:
                 self.get_names_users_and_groups(item)
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
-            try:
-                item['service'] = [self.services[x] for x in item['service']]
-            except TypeError as err:
-                print(f'\t\033[33mНе найден сервис для правила "{item["name"]}".\n\t{item["service"]}\033[0m')
-                item['service'] = []
+            item['service'] = self.get_services(item['name'], item['service'])
 
         with open("data/NetworkPolicies/NATandRouting/config_nat_rules.json", "w") as fd:
             json.dump(data, fd, indent=4, ensure_ascii=False)
@@ -2583,15 +2709,14 @@ class UTM(UtmXmlRpc):
                 except KeyError as err:
                     print(f'\t\033[33mНе найден сценарий {err} для правила "{item["name"]}".\n\tЗагрузите сценарии и повторите попытку.\033[0m')
                     item['scenario_rule_id'] = False
-            if self.version.startswith('6'):
+            if int(self.version[:1]) > 5:
                 self.get_guids_users_and_groups(item)
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
-            try:
-                item['service'] = [self.services[x] for x in item['service']]
-            except KeyError as err:
-                print(f'\t\033[33mНе найден сервис {err} для правила "{item["name"]}".\n\tЗагрузите сервисы и повторите попытку.\033[0m')
-                item['service'] = []
+            if int(self.version[:1]) == 6:
+                item['service'] = self.get_services_for_v6(item['name'], item['service'])
+            else:
+                item['service'] = self.get_services(item['name'], item['service'])
             if item['action'] == 'route':
                 print(f'\t\033[33mПроверьте шлюз для правила ПБР "{item["name"]}".\n\tВ случае отсутствия, установите вручную.\033[0m')
 
@@ -2784,9 +2909,6 @@ class UTM(UtmXmlRpc):
         if not os.path.isdir('data/NetworkPolicies/TrafficShaping'):
             os.makedirs('data/NetworkPolicies/TrafficShaping')
 
-        total, data = self.get_shaper_list()
-        self.shaper = {x['id']: x['name'] for x in data if total}
-
         _, data = self.get_shaper_rules()
 
         for item in data:
@@ -2800,7 +2922,7 @@ class UTM(UtmXmlRpc):
             self.get_names_users_and_groups(item)
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
-            item['services'] = [self.services[x] for x in item['services']]
+            item['services'] = self.get_services(item['name'], item['services'])
             self.get_apps(item['apps'])
             self.set_time_restrictions(item)
             item['pool'] = self.shaper[item['pool']]
@@ -2836,11 +2958,10 @@ class UTM(UtmXmlRpc):
             self.get_guids_users_and_groups(item)
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
-            try:
-                item['services'] = [self.services[x] for x in item['services']]
-            except KeyError as err:
-                print(f'\t\033[33mНе найден сервис {err} для правила "{item["name"]}".\n\tЗагрузите сервисы и повторите попытку.\033[0m')
-                item['service'] = []
+            if int(self.version[:1]) == 6:
+                item['services'] = self.get_services_for_v6(item['name'], item['services'])
+            else:
+                item['services'] = self.get_services(item['name'], item['services'])
             try:
                 self.get_apps(item['apps'])
             except KeyError as err:
@@ -2856,6 +2977,7 @@ class UTM(UtmXmlRpc):
             err, result = self.add_shaper_rule(shaper_rules, item)
             if err == 1:
                 print(result, end= ' - ')
+                item.pop('position', None)
                 err1, result1 = self.update_shaper_rule(shaper_rules[item['name']], item)
                 if err1 != 0:
                     print("\n", f"\033[31m{result1}\033[0m")
@@ -2866,6 +2988,7 @@ class UTM(UtmXmlRpc):
             else:
                 print(f'\tПравило пропускной способности "{item["name"]}" добавлено.')
 
+####################################### Политики безопасности  #####################################
     def export_content_rules(self):
         """Выгрузить список правил фильтрации контента"""
         print('Выгружается список "Фильтрация контента" раздела "Политики безопасности":')
@@ -2983,6 +3106,7 @@ class UTM(UtmXmlRpc):
 
             if item['name'] in content_rules:
                 print(f'\tПравило "{item["name"]}" уже существует', end= ' - ')
+                item.pop('position', None)
                 err1, result1 = self.update_content_rule(content_rules[item['name']], item)
                 if err1 == 2:
                     print("\n", f"\033[31m{result1}\033[0m")
@@ -3061,13 +3185,74 @@ class UTM(UtmXmlRpc):
                     safebrowsing_rules[item['name']] = result
                     print(f'\tПравило "{item["name"]}" добавлено.')
 
+    def export_tunnel_inspection_rules(self):
+        """Выгрузить список правил инспектирования туннелей"""
+        if int(self.version[:1]) < 7:
+            return
+
+        print('Выгружается список "Инспектирование туннелей" раздела "Политики безопасности":')
+        if not os.path.isdir('data/SecurityPolicies/TunnelInspection'):
+            os.makedirs('data/SecurityPolicies/TunnelInspection')
+
+        _, data = self.get_tunnel_inspection_rules()
+
+        for item in data:
+            item.pop('id', None)
+            item.pop('guid', None)
+            item.pop('position_layer', None)
+            self.set_src_zone_and_ips(item)
+            self.set_dst_zone_and_ips(item)
+
+        with open("data/SecurityPolicies/TunnelInspection/config_tunnelinspection_rules.json", "w") as fd:
+            json.dump(data, fd, indent=4, ensure_ascii=False)
+        print(f'\tСписок "Инспектирование туннелей" выгружен в файл "data/SecurityPolicies/TunnelInspection/config_tunnelinspection_rules.json".')
+
+    def import_tunnel_inspection_rules(self):
+        """Импортировать список правил инспектирования туннелей"""
+        if int(self.version[:1]) < 7:
+            return
+
+        print('Импорт списка "Инспектирование туннелей" раздела "Политики безопасности":')
+        try:
+            with open("data/SecurityPolicies/TunnelInspection/config_tunnelinspection_rules.json", "r") as fh:
+                data = json.load(fh)
+        except FileNotFoundError as err:
+            print(f'\t\033[31mСписок "Инспектирование туннелей" не импортирован!\n\tНе найден файл "data/SecurityPolicies/TunnelInspection/config_tunnelinspection_rules.json" с сохранённой конфигурацией!\033[0;0m')
+            return
+
+        if not data:
+            print("\tНет правил инспектирования туннелей для импорта.")
+            return
+
+        _, rules = self.get_tunnel_inspection_rules()
+        tunnel_inspect_rules = {x['name']: x['id'] for x in rules}
+
+        for item in data:
+            self.set_src_zone_and_ips(item)
+            self.set_dst_zone_and_ips(item)
+
+            if item['name'] in tunnel_inspect_rules:
+                print(f'\tПравило "{item["name"]}" уже существует', end= ' - ')
+                err1, result1 = self.update_tunnel_inspection_rule(tunnel_inspect_rules[item['name']], item)
+                if err1 == 2:
+                    print("\n", f"\033[31m{result1}\033[0m")
+                else:
+                    print("\033[32mUpdated!\033[0;0m")
+            else:
+                err, result = self.add_tunnel_inspection_rule(item)
+                if err == 2:
+                    print(f"\033[31m{result}\033[0m")
+                else:
+                    tunnel_inspect_rules[item['name']] = result
+                    print(f'\tПравило "{item["name"]}" добавлено.')
+
     def export_ssldecrypt_rules(self):
         """Выгрузить список правил инспектирования SSL"""
         print('Выгружается список "Инспектирование SSL" раздела "Политики безопасности":')
         if not os.path.isdir('data/SecurityPolicies/SSLInspection'):
             os.makedirs('data/SecurityPolicies/SSLInspection')
 
-        if self.version.startswith('6'):
+        if int(self.version[:1]) > 5:
             _, data = self.get_ssl_profiles_list()
             self.list_ssl_profiles = {x['id']: x['name'] for x in data}
 
@@ -3136,7 +3321,7 @@ class UTM(UtmXmlRpc):
 
     def export_sshdecrypt_rules(self):
         """Выгрузить список правил инспектирования SSH"""
-        if self.version.startswith('6'):
+        if int(self.version[:1]) > 5:
             print('Выгружается список "Инспектирование SSH" раздела "Политики безопасности":')
             if not os.path.isdir('data/SecurityPolicies/SSHInspection'):
                 os.makedirs('data/SecurityPolicies/SSHInspection')
@@ -3152,7 +3337,7 @@ class UTM(UtmXmlRpc):
                 self.set_src_zone_and_ips(item)
                 self.set_dst_zone_and_ips(item)
                 self.set_time_restrictions(item)
-                item['protocols'] = [self.services[x] for x in item['protocols']]
+                item['protocols'] = self.get_services(item['name'], item['protocols'])
 
             with open("data/SecurityPolicies/SSHInspection/config_sshdecrypt_rules.json", "w") as fd:
                 json.dump(data, fd, indent=4, ensure_ascii=False)
@@ -3180,11 +3365,10 @@ class UTM(UtmXmlRpc):
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
             self.set_time_restrictions(item)
-            try:
-                item['protocols'] = [self.services[x] for x in item['protocols']]
-            except KeyError as err:
-                print(f'\t\033[33mНе найден сервис {err} для правила "{item["name"]}".\n\tЗагрузите список сервисов и повторите попытку.\033[0m')
-                item['protocols'] = []
+            if int(self.version[:1]) == 6:
+                item['protocols'] = self.get_services_for_v6(item['name'], item['protocols'])
+            else:
+                item['protocols'] = self.get_services(item['name'], item['protocols'])
 
             if item['name'] in sshdecrypt_rules:
                 print(f'\tПравило "{item["name"]}" уже существует', end= ' - ')
@@ -3218,19 +3402,17 @@ class UTM(UtmXmlRpc):
             item.pop('position_layer', None)
             item.pop('apps', None)
             item.pop('cc', None)
+            if item['action'] == 'drop':   # Для версий < 7
+                item['action'] = 'reset'
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
-            try:
-                item['services'] = [self.services[x] for x in item['services']]
-            except KeyError as err:
-                print(f'\t\033[33mНе найден сервис {err} для правила "{item["name"]}".\n\tПроверьте список сервисов этого правила.\033[0m')
-                item['services'] = []
+            item['services'] = self.get_services(item['name'], item['services'])
             try:
                 item['idps_profiles'] = [idps_profiles[x] for x in item['idps_profiles']]
             except KeyError as err:
                 print(f'\t\033[33mНе найден профиль СОВ {err} для правила "{item["name"]}".\n\tПроверьте профиль СОВ этого правила.\033[0m')
                 item['idps_profiles'] = []
-            if self.version.startswith('6'):
+            if int(self.version[:1]) > 5:
                 try:
                     item['idps_profiles_exclusions'] = [idps_profiles[x] for x in item['idps_profiles_exclusions']]
                 except KeyError as err:
@@ -3264,13 +3446,14 @@ class UTM(UtmXmlRpc):
         idps_rules = {x['name']: x['id'] for x in rules}
 
         for item in data:
+            if int(self.version[:1]) == 6 and item['action'] == 'reset':
+                item['action'] == 'drop'
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
-            try:
-                item['services'] = [self.services[x] for x in item['services']]
-            except KeyError as err:
-                print(f'\t\033[33mНе найден сервис {err} для правила "{item["name"]}".\n\tЗагрузите список сервисов и повторите попытку.\033[0m')
-                item['services'] = []
+            if int(self.version[:1]) == 6:
+                item['services'] = self.get_services_for_v6(item['name'], item['services'])
+            else:
+                item['services'] = self.get_services(item['name'], item['services'])
             try:
                 item['idps_profiles'] = [idps_profiles[x] for x in item['idps_profiles']]
             except KeyError as err:
@@ -3299,6 +3482,9 @@ class UTM(UtmXmlRpc):
 
     def export_scada_rules(self):
         """Выгрузить список правил АСУ ТП"""
+        if self.version.startswith('7'):
+            return
+
         print('Выгружается список "Правила АСУ ТП" раздела "Политики безопасности":')
         if not os.path.isdir('data/SecurityPolicies/SCADARules'):
             os.makedirs('data/SecurityPolicies/SCADARules')
@@ -3324,6 +3510,9 @@ class UTM(UtmXmlRpc):
 
     def import_scada_rules(self):
         """Импортировать список правил АСУ ТП"""
+        if self.version.startswith('7'):
+            return
+
         print('Импорт списка "Правила АСУ ТП" раздела "Политики безопасности":')
         try:
             with open("data/SecurityPolicies/SCADARules/config_scada_rules.json", "r") as fh:
@@ -3463,12 +3652,12 @@ class UTM(UtmXmlRpc):
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
             self.get_names_users_and_groups(item)
-            if self.version.startswith('6'):
-                item['services'] = [self.services[x] for x in item['services']]
-            else:
-                item['services'] = ["POP3" if x == 'pop' else x.upper() for x in item.pop('protocol')]
+            if self.version.startswith('5'):
+                item['services'] = [['service', "POP3" if x == 'pop' else x.upper()] for x in item.pop('protocol')]
                 item['envelope_from_negate'] = False
                 item['envelope_to_negate'] = False
+            else:
+                item['services'] = self.get_services(item['name'], item['services'])
             item['envelope_from'] = [[x[0], email[x[1]]] for x in item['envelope_from']]
             item['envelope_to'] = [[x[0], email[x[1]]] for x in item['envelope_to']]
 
@@ -3517,11 +3706,10 @@ class UTM(UtmXmlRpc):
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
             self.get_guids_users_and_groups(item)
-            try:
-                item['services'] = [self.services[x] for x in item['services']]
-            except KeyError as err:
-                print(f'\t\033[33mНе найден сервис {err} для правила "{item["name"]}".\n\tЗагрузите список сервисов и повторите попытку.\033[0m')
-                item['services'] = []
+            if int(self.version[:1]) == 6:
+                item['services'] = self.get_services_for_v6(item['name'], item['services'])
+            else:
+                item['services'] = self.get_services(item['name'], item['services'])
             try:
                 item['envelope_from'] = [[x[0], email[x[1]]] for x in item['envelope_from']]
             except KeyError as err:
@@ -3655,19 +3843,22 @@ class UTM(UtmXmlRpc):
         icap_rules = {x['name']: x['id'] for x in icaprules if total}
 
         for item in data:
+            bad_servers = []
             for server in item['servers']:
                 if server[0] == 'lbrule':
                     try:
                         server[1] = self.icap_loadbalancing[server[1]]
                     except KeyError as err:
                         print(f'\t\033[33mНе найден балансировщик серверов ICAP {err} для правила "{item["name"]}".\n\tИмпортируйте балансировщики ICAP и повторите попытку.\033[0m')
-                        item['servers'] = []
+                        bad_servers.append(server)
                 elif server[0] == 'profile':
                     try:
                         server[1] = self.icap_servers[server[1]]
                     except KeyError as err:
                         print(f'\t\033[33mНе найден сервер ICAP {err} для правила "{item["name"]}".\n\tИмпортируйте сервера ICAP и повторите попытку.\033[0m')
-                        item['servers'] = []
+                        bad_servers.append(server)
+            for server in bad_servers:
+                item['servers'].remove(server)
             self.get_guids_users_and_groups(item)
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
@@ -3756,7 +3947,7 @@ class UTM(UtmXmlRpc):
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
             self.get_names_users_and_groups(item)
-            item['services'] = [self.services[x] for x in item['services']]
+            item['services'] = self.get_services(item['name'], item['services'])
             self.set_time_restrictions(item)
             item['dos_profile'] = dos_profiles[item['dos_profile']]
             if item['scenario_rule_id']:
@@ -3791,11 +3982,10 @@ class UTM(UtmXmlRpc):
             self.set_src_zone_and_ips(item)
             self.set_dst_zone_and_ips(item)
             self.set_time_restrictions(item)
-            try:
-                item['services'] = [self.services[x] for x in item['services']]
-            except KeyError as err:
-                print(f'\t\033[33mНе найден сервис {err} для правила "{item["name"]}".\n\tЗагрузите список сервисов и повторите попытку.\033[0m')
-                item['services'] = []
+            if int(self.version[:1]) == 6:
+                item['services'] = self.get_services_for_v6(item['name'], item['services'])
+            else:
+                item['services'] = self.get_services(item['name'], item['services'])
             try:
                 item['dos_profile'] = dos_profiles[item['dos_profile']]
             except KeyError as err:
@@ -3823,13 +4013,14 @@ class UTM(UtmXmlRpc):
                     dos_rules[item['name']] = result
                     print(f'\tПравило "{item["name"]}" добавлено.')
 
+####################################### Глобальный портал  #####################################
     def export_proxyportal_rules(self):
         """Выгрузить список URL-ресурсов веб-портала"""
         print('Выгружается список "Веб-портал" раздела "Глобальный портал":')
         if not os.path.isdir('data/GlobalPortal/WebPortal'):
             os.makedirs('data/GlobalPortal/WebPortal')
 
-        if self.version.startswith('6'):
+        if int(self.version[:1]) > 5:
             _, result = self.get_ssl_profiles_list()
             ssl_profiles = {x['id']: x['name'] for x in result}
             err, result = self.get_certificates_list()
@@ -3842,14 +4033,14 @@ class UTM(UtmXmlRpc):
             item.pop('rownumber', None)
             item.pop('position_layer', None)
             self.get_names_users_and_groups(item)
-            if self.version.startswith('6'):
+            if self.version.startswith('5'):
+                item['mapping_url_ssl_profile_id'] = 0
+                item['mapping_url_certificate_id'] = 0
+            else:
                 if item['mapping_url_ssl_profile_id']:
                     item['mapping_url_ssl_profile_id'] = ssl_profiles[item['mapping_url_ssl_profile_id']]
                 if item['mapping_url_certificate_id']:
                     item['mapping_url_certificate_id'] = ssl_certificates[item['mapping_url_certificate_id']]
-            else:
-                item['mapping_url_ssl_profile_id'] = 0
-                item['mapping_url_certificate_id'] = 0
 
         with open("data/GlobalPortal/WebPortal/config_web_portal.json", "w") as fd:
             json.dump(data, fd, indent=4, ensure_ascii=False)
@@ -3963,7 +4154,7 @@ class UTM(UtmXmlRpc):
         _, _, reverse = self.get_loadbalancing_rules()
         self.reverse_rules = {x['id']: x['name'] for x in reverse}
 
-        if self.version.startswith('6'):
+        if int(self.version[:1]) > 5:
             _, result = self.get_ssl_profiles_list()
             ssl_profiles = {x['id']: x['name'] for x in result}
 
@@ -3982,20 +4173,20 @@ class UTM(UtmXmlRpc):
             self.set_dst_zone_and_ips(item)
             self.get_names_users_and_groups(item)
             try:
-                if item['certificate_id'] != -1:
+                if item['certificate_id'] not in (-1, 0):
                     item['certificate_id'] = ssl_certificates[item['certificate_id']]
             except KeyError:
                 print(f'\t\033[33mВ правиле "{item["name"]}" указан несуществующий сертификат.\033[0m')
-                item['certificate_id'] = -1
-                item['is_https'] = False                
-            if self.version.startswith('6'):
+                item['certificate_id'] = 0
+                item['is_https'] = False
+            if int(self.version[:1]) > 5:
                 try:
                     if item['ssl_profile_id']:
                         item['ssl_profile_id'] = ssl_profiles[item['ssl_profile_id']]
                 except KeyError:
                     print(f'\t\033[33mВ правиле "{item["name"]}" указан несуществующий профиль SSL.\033[0m')
                     item['ssl_profile_id'] = 0
-                    item['is_https'] = False                
+                    item['is_https'] = False
             else:
                 item['ssl_profile_id'] = 0
             try:
@@ -4050,13 +4241,16 @@ class UTM(UtmXmlRpc):
             except KeyError as err:
                 print(f'\t\033[33mНе найден сервер reverse-прокси или балансировщик {err} для правила "{item["name"]}".\n\tИмпортируйте reverse-прокси или балансировщик и повторите попытку.\033[0m')
                 continue
-            if item['certificate_id'] != -1:
+            if item['certificate_id'] not in (-1, 0):
                 try:
                     item['certificate_id'] = ssl_certificates[item['certificate_id']]
                 except KeyError as err:
                     print(f'\t\033[33mНе найден сертификат {err} для правила "{item["name"]}".\n\tСоздайте сертификат и повторите попытку.\033[0m')
                     item['certificate_id'] = -1
                     item['is_https'] = False
+            elif not item['certificate_id']:
+                item['certificate_id'] = -1
+                item['is_https'] = False
             if item['ssl_profile_id']:
                 try:
                     item['ssl_profile_id'] = self.list_ssl_profiles[item['ssl_profile_id']]
@@ -4086,8 +4280,9 @@ class UTM(UtmXmlRpc):
                 else:
                     reverseproxy_rules[item['name']] = result
                     print(f'\tПравило reverse-прокси "{item["name"]}" добавлено.')
-        print(f'\t\033[33mПроверьте флаг "Использовать HTTPS" во всех импортированных правилах!\n\tЕсли не установлен профиль SSL, выберите нужный.\033[0;0m')
+        print(f'\t\033[36mПроверьте флаг "Использовать HTTPS" во всех импортированных правилах!\n\tЕсли не установлен профиль SSL, выберите нужный.\033[0;0m')
 
+####################################### VPN  ########################################
     def export_vpn_security_profiles(self):
         """Выгрузить список профилей безопасности VPN"""
         print('Выгружается список "Профили безопасности VPN" раздела "VPN":')
@@ -5050,6 +5245,8 @@ class UTM(UtmXmlRpc):
                 item['ifname'] = iface_name[item['iface_id']] if item['iface_id'] else 'undefined'
                 item.pop('iface_id', None)
             else:
+                if item['bgp']['as_number'] == "null":
+                    item['bgp']['as_number'] = 0
                 if item['routes']:
                     for x in item['routes']:
                         x.pop('id', None)
@@ -5233,7 +5430,7 @@ class UTM(UtmXmlRpc):
                     print(f'\033[31m{result}\033[0m')
                 else:
                     print(f'\tСоздано правило SNMP "{item["name"]}".')
-            if item['auth_type']:
+            if item['version'] == 3:
                 print(f'\t\033[36mВ правиле "{item["name"]}" используется SNMP v3.\n\tПароли не переносятся, поэтому заново введите пароль для аутентификации и шифрования.\033[0m')
 
     def export_notification_alert_rules(self):
@@ -5309,6 +5506,33 @@ class UTM(UtmXmlRpc):
                         print(f'\tСоздано правило оповещения "{item["name"]}".')
 
 ################################## Служебные функции ###################################
+    def get_services_for_v6(self, rule_name, service_list):
+        new_service_list = []
+        if int(self.version[:1]) < 7:
+            for item in service_list:
+                try:
+                    if item[0] == 'service':
+                        new_service_list.append(self.services[item[1]])
+                except KeyError as err:
+                    print(f'\t\033[33mНе найден сервис {item} для правила "{rule_name}".\033[0m')
+        return new_service_list
+
+    def get_services(self, rule_name, service_list):
+        new_service_list = []
+        if int(self.version[:1]) < 7:
+            for item in service_list:
+                try:
+                    new_service_list.append(['service', self.services[item]])
+                except KeyError as err:
+                    print(f'\t\033[33mНе найден сервис {item} для правила "{rule_name}".\033[0m')
+        else:
+            for item in service_list:
+                try:
+                    new_service_list.append(['service', self.services[item[1]]] if item[0] == 'service' else ['list_id', self.services_groups[item[1]]])
+                except KeyError as err:
+                    print(f'\t\033[33mНе найден сервис {item} для правила "{rule_name}".\033[0m')
+        return new_service_list
+
     def translate_iface_name(self, data):
         if self.version.startswith('5'):
             iface_name = {x['name']: x['name'].replace('eth', 'port', 1) if x['name'].startswith('eth') else x['name'].replace('rename', 'port', 1) for x in data}
@@ -5399,11 +5623,12 @@ class UTM(UtmXmlRpc):
             try:
                 item['time_restrictions'] = [self.list_calendar[x] for x in item['time_restrictions']]
             except KeyError as err:
-                print(f'\t\033[33mНе найден календарь {err} для правила "{item["name"]}".\n\tЗагрузите списки URL и повторите попытку.\033[0m')
+                print(f'\t\033[33mНе найден календарь {err} для правила "{item["name"]}".\n\tЗагрузите календари в библиотеку и повторите попытку.\033[0m')
                 item['time_restrictions'] = []
 
     def get_apps(self, array_apps):
         """Определяем имя приложения по ID при экспорте и ID приложения по имени при импорте"""
+        list_bad_app = []
         for app in array_apps:
             if app[0] == 'ro_group':
                 if app[1] == 0:
@@ -5421,10 +5646,16 @@ class UTM(UtmXmlRpc):
                 except KeyError as err:
                     print(f'\t\033[33mНе найдена группа приложений №{err}.\n\tЗагрузите приложения и повторите попытку.\033[0m')
             elif app[0] == 'app':
-                try:
-                    app[1] = self.l7_apps[app[1]]
-                except KeyError as err:
-                    print(f'\t\033[33mНе найдено приложение №{err}.\n\tВозможно нет лицензии, и UTM не получил список приложений l7.\n\tЗагрузите приложения или установите лицензию и повторите попытку.\033[0m')
+                if int(self.version[:1]) < 7:
+                    try:
+                        app[1] = self.l7_apps[app[1]]
+                    except KeyError as err:
+                        print(f'\t\033[33mНе найдено приложение №{err}.\n\tВозможно нет лицензии, и UTM не получил список приложений l7.\n\tЗагрузите приложения или установите лицензию и повторите попытку.\033[0m')
+                else:
+                    list_bad_app.append(app)
+                    print(f'\t\033[33mПриложение {app[1]} не добавлено так как отдельное приложение добавить нельзя.\n\t\tСоздайте группу для данного приложения и повторите попытку.\033[0m')
+        for app in list_bad_app:
+            array_apps.remove(app)
 
     def get_names_users_and_groups(self, item):
         """
@@ -5534,8 +5765,8 @@ def menu2(utm, mode):
     print(f"Выберите раздел для {'экспорта' if mode == 1 else 'импорта'}.\n")
     print("1   - Библиотека")
     print("2   - Сеть")
-    print("3   - Настройки")
-    print("4   - Пользователи и устройства")
+    print("3   - Пользователи и устройства")
+    print("4   - Настройки")
     print("5   - Политики сети")
     print("6   - Политики безопасности")
     print("7   - Глобальный портал")
@@ -5568,24 +5799,27 @@ def menu3(utm, mode, section):
         if section == 1:
             print('1   - Экспортировать список "Морфология" раздела "Библиотеки".')
             print('2   - Экспортировать список "Сервисы" раздела "Библиотеки".')
-            print('3   - Экспортировать список "IP-адреса" раздела "Библиотеки".')
-            print('4   - Экспортировать список "UserAgent браузеров" раздела "Библиотеки".')
-            print('5   - Экспортировать список "Типы контента" раздела "Библиотеки".')
-            print('6   - Экспортировать список "Списки URL" раздела "Библиотеки".')
-            print('7   - Экспортировать список "Календари" раздела "Библиотеки".')
-            print('8   - Экспортировать список "Полосы пропускания" раздела "Библиотеки".')
-            print('9   - Экспортировать список "Профили АСУ ТП" раздела "Библиотеки".')
-            print('10  - Экспортировать список "Шаблоны страниц" раздела "Библиотеки".')
-            print('11  - Экспортировать список "Категории URL" раздела "Библиотеки".')
-            print('12  - Экспортировать список "Изменённые категории URL" раздела "Библиотеки".')
-            print('13  - Экспортировать список "Приложения" раздела "Библиотеки".')
-            print('14  - Экспортировать список "Почтовые адреса" раздела "Библиотеки".')
-            print('15  - Экспортировать список "Номера телефонов" раздела "Библиотеки".')
-            print('16  - Экспортировать список "Профили СОВ" раздела "Библиотеки".')
-            print('17  - Экспортировать список "Профили оповещений" раздела "Библиотеки".')
-            print('18  - Экспортировать список "Профили netflow" раздела "Библиотеки".')
-            if utm.version.startswith('6'):
-                print('19  - Экспортировать список "Профили SSL" раздела "Библиотеки".')
+            if int(utm.version[:1]) > 6:
+                print('3   - Экспортировать списки "Группы сервисов" раздела "Библиотеки".')
+            print('4   - Экспортировать список "IP-адреса" раздела "Библиотеки".')
+            print('5   - Экспортировать список "UserAgent браузеров" раздела "Библиотеки".')
+            print('6   - Экспортировать список "Типы контента" раздела "Библиотеки".')
+            print('7   - Экспортировать список "Списки URL" раздела "Библиотеки".')
+            print('8   - Экспортировать список "Календари" раздела "Библиотеки".')
+            print('9   - Экспортировать список "Полосы пропускания" раздела "Библиотеки".')
+            if int(utm.version[:1]) < 7:
+                print('10  - Экспортировать список "Профили АСУ ТП" раздела "Библиотеки".')
+            print('11  - Экспортировать список "Шаблоны страниц" раздела "Библиотеки".')
+            print('12  - Экспортировать список "Категории URL" раздела "Библиотеки".')
+            print('13  - Экспортировать список "Изменённые категории URL" раздела "Библиотеки".')
+            print('14  - Экспортировать список "Приложения" раздела "Библиотеки".')
+            print('15  - Экспортировать список "Почтовые адреса" раздела "Библиотеки".')
+            print('16  - Экспортировать список "Номера телефонов" раздела "Библиотеки".')
+            print('17  - Экспортировать список "Профили СОВ" раздела "Библиотеки".')
+            print('18  - Экспортировать список "Профили оповещений" раздела "Библиотеки".')
+            print('19  - Экспортировать список "Профили netflow" раздела "Библиотеки".')
+            if int(utm.version[:1]) > 5:
+                print('20  - Экспортировать список "Профили SSL" раздела "Библиотеки".')
             print('\033[36m99  - Экспортировать всё.\033[0m')
             print('\033[35m999 - Вверх (вернуться в предыдущее меню).\033[0m')
             print("\033[33m0   - Выход.\033[0m")
@@ -5607,6 +5841,19 @@ def menu3(utm, mode, section):
             print('\033[35m999 - Вверх (вернуться в предыдущее меню).\033[0m')
             print("\033[33m0   - Выход.\033[0m")
         elif section == 3:
+            print("1   - Экспортировать список локальных групп.")
+            print("2   - Экспортировать список локальных пользователей.")
+            print('3   - Экспортировать список "Профили MFA".')
+            print('4   - Экспортировать список "Серверы авторизации".')
+            print('5   - Экспортировать список "Профили авторизации".')
+            print('6   - Экспортировать список "Captive-профили".')
+            print('7   - Экспортировать список "Captive-портал".')
+            if int(utm.version[:1]) < 7:
+                print('8   - Экспортировать список "Политики BYOD".')
+            print('\033[36m99  - Экспортировать всё.\033[0m')
+            print('\033[35m999 - Вверх (вернуться в предыдущее меню).\033[0m')
+            print("\033[33m0   - Выход.\033[0m")
+        elif section == 4:
             print('1   - Экспортировать настройки интерфейса веб-консоли раздела "UserGate/Настройки".')
             print('2   - Экспортировать настройки NTP раздела "UserGate/Настройки".')
             print('3   - Экспортировать настройки Модулей и кэширования HTTP раздела "UserGate/Настройки".')
@@ -5615,18 +5862,6 @@ def menu3(utm, mode, section):
             print('6   - Экспортировать настройки паролей администраторов раздела "UserGate/Администраторы".')
             print('7   - Экспортировать список администраторов раздела "UserGate/Администраторы".')
             print('8   - Экспортировать список "Сертификаты" раздела "UserGate".')
-            print('\033[36m99  - Экспортировать всё.\033[0m')
-            print('\033[35m999 - Вверх (вернуться в предыдущее меню).\033[0m')
-            print("\033[33m0   - Выход.\033[0m")
-        elif section == 4:
-            print("1   - Экспортировать список локальных групп.")
-            print("2   - Экспортировать список локальных пользователей.")
-            print('3   - Экспортировать список "Профили MFA".')
-            print('4   - Экспортировать список "Серверы авторизации".')
-            print('5   - Экспортировать список "Профили авторизации".')
-            print('6   - Экспортировать список "Captive-профили".')
-            print('7   - Экспортировать список "Captive-портал".')
-            print('8   - Экспортировать список "Политики BYOD".')
             print('\033[36m99  - Экспортировать всё.\033[0m')
             print('\033[35m999 - Вверх (вернуться в предыдущее меню).\033[0m')
             print("\033[33m0   - Выход.\033[0m")
@@ -5641,17 +5876,20 @@ def menu3(utm, mode, section):
         elif section == 6:
             print("1   - Экспортировать правила фильтрации контента.")
             print("2   - Экспортировать правила веб-безопасности.")
-            print("3   - Экспортировать правила инспектирования SSL.")
-            if utm.version.startswith('6'):
-                print("4   - Экспортировать правила инспектирования SSH.")
-            print("5   - Экспортировать правила СОВ.")
-            print("6   - Экспортировать правила АСУ ТП.")
-            print("7   - Экспортировать сценарии.")
-            print('8   - Экспортировать список "Защита почтового трафика".')
-            print('9   - Экспортировать список "ICAP-серверы".')
-            print('10   - Экспортировать список "ICAP-правила".')
-            print('11   - Экспортировать список "Профили DoS".')
-            print('12   - Экспортировать список "Правила защиты DoS".')
+            if int(utm.version[:1]) > 6:
+                print("3   - Экспортировать правила инспектирования туннелей.")
+            print("4   - Экспортировать правила инспектирования SSL.")
+            if int(utm.version[:1]) > 5:
+                print("5   - Экспортировать правила инспектирования SSH.")
+            print("6   - Экспортировать правила СОВ.")
+            if int(utm.version[:1]) < 7:
+                print("7   - Экспортировать правила АСУ ТП.")
+            print("8   - Экспортировать сценарии.")
+            print('9   - Экспортировать список "Защита почтового трафика".')
+            print('10  - Экспортировать список "ICAP-серверы".')
+            print('11  - Экспортировать список "ICAP-правила".')
+            print('12  - Экспортировать список "Профили DoS".')
+            print('13  - Экспортировать список "Правила защиты DoS".')
             print('\033[36m99  - Экспортировать всё.\033[0m')
             print('\033[35m999 - Вверх (вернуться в предыдущее меню).\033[0m')
             print("\033[33m0   - Выход.\033[0m")
@@ -5680,24 +5918,27 @@ def menu3(utm, mode, section):
         if section == 1:
             print("1   - Импортировать списки морфологии.")
             print('2   - Импортировать список "Сервисы" раздела "Библиотеки".')
-            print('3   - Импортировать список "IP-адреса" раздела "Библиотеки".')
-            print('4   - Импортировать список "UserAgent браузеров" раздела "Библиотеки".')
-            print('5   - Импортировать список "Типы контента" раздела "Библиотеки".')
-            print('6   - Импортировать "Список URL" раздела "Библиотеки".')
-            print('7   - Импортировать список "Календари" раздела "Библиотеки".')
-            print('8   - Импортировать список "Полосы пропускания" раздела "Библиотеки".')
-            print('9   - Импортировать список "Профили АСУ ТП" раздела "Библиотеки".')
-            print('10  - Импортировать список "Шаблоны страниц" раздела "Библиотеки".')
-            print('11  - Импортировать список "Категории URL" раздела "Библиотеки".')
-            print('12  - Импортировать список "Изменённые категории URL" раздела "Библиотеки".')
-            print('13  - Импортировать список "Приложения" раздела "Библиотеки".')
-            print('14  - Импортировать список "Почтовые адреса" раздела "Библиотеки".')
-            print('15  - Импортировать список "Номера телефонов" раздела "Библиотеки".')
-            print('16  - Импортировать список "Профили СОВ" раздела "Библиотеки".')
-            print('17  - Импортировать список "Профили оповещений" раздела "Библиотеки".')
-            print('18  - Импортировать список "Профили netflow" раздела "Библиотеки".')
-            if utm.version.startswith('6'):
-                print('19  - Импортировать список "Профили SSL" раздела "Библиотеки".')
+            if int(utm.version[:1]) > 6:
+                print('3   - Импортировать списки "Группы сервисов" раздела "Библиотеки".')
+            print('4   - Импортировать список "IP-адреса" раздела "Библиотеки".')
+            print('5   - Импортировать список "UserAgent браузеров" раздела "Библиотеки".')
+            print('6   - Импортировать список "Типы контента" раздела "Библиотеки".')
+            print('7   - Импортировать "Список URL" раздела "Библиотеки".')
+            print('8   - Импортировать список "Календари" раздела "Библиотеки".')
+            print('9   - Импортировать список "Полосы пропускания" раздела "Библиотеки".')
+            if int(utm.version[:1]) < 7:
+                print('10   - Импортировать список "Профили АСУ ТП" раздела "Библиотеки".')
+            print('11  - Импортировать список "Шаблоны страниц" раздела "Библиотеки".')
+            print('12  - Импортировать список "Категории URL" раздела "Библиотеки".')
+            print('13  - Импортировать список "Изменённые категории URL" раздела "Библиотеки".')
+            print('14  - Импортировать список "Приложения" раздела "Библиотеки".')
+            print('15  - Импортировать список "Почтовые адреса" раздела "Библиотеки".')
+            print('16  - Импортировать список "Номера телефонов" раздела "Библиотеки".')
+            print('17  - Импортировать список "Профили СОВ" раздела "Библиотеки".')
+            print('18  - Импортировать список "Профили оповещений" раздела "Библиотеки".')
+            print('19  - Импортировать список "Профили netflow" раздела "Библиотеки".')
+            if int(utm.version[:1]) > 5:
+                print('20  - Импортировать список "Профили SSL" раздела "Библиотеки".')
             print('\033[36m99  - Импортировать всё.\033[0m')
             print('\033[35m999 - Вверх (вернуться в предыдущее меню).\033[0m')
             print("\033[33m0   - Выход.\033[0m")
@@ -5714,28 +5955,30 @@ def menu3(utm, mode, section):
             print('\033[35m999 - Вверх (вернуться в предыдущее меню).\033[0m')
             print("\033[33m0   - Выход.\033[0m")
         elif section == 3:
-            print('1   - Импортировать настройки интерфейса веб-консоли раздела "UserGate/Настройки".')
-            print('2   - Импортировать настройки NTP раздела "UserGate/Настройки".')
-            print('3   - Импортировать настройки Модулей и кэширования HTTP раздела "UserGate/Настройки".')
-            print('4   - Импортировать список "Профили администраторов" раздела "UserGate/Администраторы".')
-            print('5   - Импортировать настройки паролей администраторов раздела "UserGate/Администраторы".')
-            print('6   - Импортировать список администраторов раздела "UserGate/Администраторы".')
+            print("1   - Импортировать список серверов авторизации LDAP.")
+            print("2   - Импортировать список серверов авторизации NTLM.")
+            print("3   - Импортировать список серверов авторизации RADIUS.")
+            print("4   - Импортировать список серверов авторизации TACACS.")
+            print("5   - Импортировать список серверов авторизации SAML.")
+            print('6   - Импортировать список "Профили авторизации".')
+            print('7   - Импортировать список "Captive-профили".')
+            print('8   - Импортировать список "Captive-портал".')
+            print("9   - Импортировать список локальных групп.")
+            print("10  - Импортировать список локальных пользователей.")
+            print('11  - Импортировать список "Профили MFA".')
+            if int(utm.version[:1]) < 7:
+                print('12  - Импортировать список "Политики BYOD".')
             print('\033[36m99  - Импортировать всё.\033[0m')
             print('\033[35m999 - Вверх (вернуться в предыдущее меню).\033[0m')
             print("\033[33m0   - Выход.\033[0m")
         elif section == 4:
-            print("1   - Импортировать список локальных групп.")
-            print("2   - Импортировать список локальных пользователей.")
-            print('3   - Импортировать список "Профили MFA".')
-            print("4   - Импортировать список серверов авторизации LDAP.")
-            print("5   - Импортировать список серверов авторизации NTLM.")
-            print("6   - Импортировать список серверов авторизации RADIUS.")
-            print("7   - Импортировать список серверов авторизации TACACS.")
-            print("8   - Импортировать список серверов авторизации SAML.")
-            print('9   - Импортировать список "Профили авторизации".')
-            print('10  - Импортировать список "Captive-профили".')
-            print('11  - Импортировать список "Captive-портал".')
-            print('12  - Импортировать список "Политики BYOD".')
+            print('1   - Импортировать настройки интерфейса веб-консоли раздела "UserGate/Настройки".')
+            print('2   - Импортировать настройки NTP раздела "UserGate/Настройки".')
+            print('3   - Импортировать настройки Модулей и кэширования HTTP раздела "UserGate/Настройки".')
+            print('4   - Импортировать настройки Веб-портала раздела "UserGate/Настройки".')
+            print('5   - Импортировать настройки паролей администраторов раздела "UserGate/Администраторы".')
+            print('6   - Импортировать список "Профили администраторов" раздела "UserGate/Администраторы".')
+            print('7   - Импортировать список администраторов раздела "UserGate/Администраторы".')
             print('\033[36m99  - Импортировать всё.\033[0m')
             print('\033[35m999 - Вверх (вернуться в предыдущее меню).\033[0m')
             print("\033[33m0   - Выход.\033[0m")
@@ -5743,7 +5986,8 @@ def menu3(utm, mode, section):
             print("1   - Импортировать Сценарии.")
             print("2   - Импортировать правила межсетевого экрана.")
             print("3   - Импортировать правила NAT.")
-            print('4   - Импортировать список "ICAP-серверы".')
+            print('4   - Импортировать список "ICAP-серверы" из раздела "Политики безопасности".')
+            print('5   - Импортировать список "Серверы reverse-прокси" раздела "Глобальный портал".')
             print("6   - Импортировать правила балансировки нагрузки.")
             print("7   - Импортировать правила пропускной способности.")
             print('\033[36m99  - Импортировать всё.\033[0m')
@@ -5752,14 +5996,19 @@ def menu3(utm, mode, section):
         elif section == 6:
             print('1   - Импортировать список "Фильтрация контента".')
             print('2   - Импортировать список "Веб-безопасность".')
-            print('3   - Импортировать список "Инспектирование SSL".')
-            print('4   - Импортировать список "Инспектирование SSH".')
-            print('5   - Импортировать правила "СОВ".')
-            print('6   - Импортировать список "Правила АСУ ТП".')
-            print('7   - Импортировать список "Защита почтового трафика".')
-            print('8   - Импортировать список "ICAP-правила".')
-            print('9   - Импортировать список "Профили DoS".')
-            print('10  - Импортировать список "Правила защиты DoS".')
+            if int(utm.version[:1]) > 6:
+                print('3   - Импортировать список "Инспектирование туннелей".')
+            print('4   - Импортировать список "Инспектирование SSL".')
+            print('5   - Импортировать список "Инспектирование SSH".')
+            print('6   - Импортировать правила "СОВ".')
+            if int(utm.version[:1]) < 7:
+                print('7   - Импортировать список "Правила АСУ ТП".')
+            print("8   - Импортировать Сценарии.")
+            print('9   - Импортировать список "Защита почтового трафика".')
+            print('10  - Импортировать список "ICAP-серверы".')
+            print('11  - Импортировать список "ICAP-правила".')
+            print('12  - Импортировать список "Профили DoS".')
+            print('13  - Импортировать список "Правила защиты DoS".')
             print('\033[36m99  - Импортировать всё.\033[0m')
             print('\033[35m999 - Вверх (вернуться в предыдущее меню).\033[0m')
             print("\033[33m0   - Выход.\033[0m")
@@ -5790,7 +6039,7 @@ def menu3(utm, mode, section):
         try:
             command = int(input("\nВведите номер нужной операции: "))
             print("")
-            if command not in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 99, 999]:
+            if command not in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 99, 999]:
                 print("Вы ввели несуществующую команду.")
             elif command == 0:
                 utm.logout()
@@ -5814,42 +6063,45 @@ def executor(utm, mode, section, command):
             elif command == 102:
                 utm.export_services_list()
             elif command == 103:
-                utm.export_IP_lists()
+                utm.export_services_groups()
             elif command == 104:
-                utm.export_useragent_lists()
+                utm.export_IP_lists()
             elif command == 105:
-                utm.export_mime_lists()
+                utm.export_useragent_lists()
             elif command == 106:
-                utm.export_url_lists()
+                utm.export_mime_lists()
             elif command == 107:
-                utm.export_time_restricted_lists()
+                utm.export_url_lists()
             elif command == 108:
-                utm.export_shaper_list()
+                utm.export_time_restricted_lists()
             elif command == 109:
-                utm.export_scada_list()
+                utm.export_shaper_list()
             elif command == 110:
-                utm.export_templates_list()
+                utm.export_scada_list()
             elif command == 111:
-                utm.export_categories_groups()
+                utm.export_templates_list()
             elif command == 112:
-                utm.export_custom_url_list()
+                utm.export_categories_groups()
             elif command == 113:
-                utm.export_application_groups()
+                utm.export_custom_url_list()
             elif command == 114:
-                utm.export_nlist_groups('emailgroup')
+                utm.export_application_groups()
             elif command == 115:
-                utm.export_nlist_groups('phonegroup')
+                utm.export_nlist_groups('emailgroup')
             elif command == 116:
-                utm.export_ips_profiles()
+                utm.export_nlist_groups('phonegroup')
             elif command == 117:
-                utm.export_notification_profiles_list()
+                utm.export_ips_profiles()
             elif command == 118:
-                utm.export_netflow_profiles_list()
+                utm.export_notification_profiles_list()
             elif command == 119:
+                utm.export_netflow_profiles_list()
+            elif command == 120:
                 utm.export_ssl_profiles_list()
             elif command == 199:
                 utm.export_morphology_lists()
                 utm.export_services_list()
+                utm.export_services_groups()
                 utm.export_IP_lists()
                 utm.export_useragent_lists()
                 utm.export_mime_lists()
@@ -5901,10 +6153,36 @@ def executor(utm, mode, section, command):
                 utm.export_wccp_list()
 
             elif command == 301:
-                utm.export_ui()
+                utm.export_groups_lists()
             elif command == 302:
-                utm.export_ntp()
+                utm.export_users_lists()
             elif command == 303:
+                utm.export_2fa_profiles()
+            elif command == 304:
+                utm.export_auth_servers()
+            elif command == 305:
+                utm.export_auth_profiles()
+            elif command == 306:
+                utm.export_captive_profiles()
+            elif command == 307:
+                utm.export_captive_portal_rules()
+            elif command == 308:
+                utm.export_byod_policy()
+            elif command == 399:
+                utm.export_groups_lists()
+                utm.export_users_lists()
+                utm.export_2fa_profiles()
+                utm.export_auth_servers()
+                utm.export_auth_profiles()
+                utm.export_captive_profiles()
+                utm.export_captive_portal_rules()
+                utm.export_byod_policy()
+
+            elif command == 401:
+                utm.export_ui()
+            elif command == 402:
+                utm.export_ntp()
+            elif command == 403:
                 utm.export_settings()
                 utm.export_snmp_engine()
                 utm.export_pcap_settings()
@@ -5912,51 +6190,31 @@ def executor(utm, mode, section, command):
                 utm.export_statistics_status()
                 utm.export_mc_status()
                 utm.export_update_schedule()
-            elif command == 304:
+            elif command == 404:
                 utm.export_proxy_portal()
-            elif command == 305:
+            elif command == 405:
                 utm.export_admin_profiles_list()
-            elif command == 306:
+            elif command == 406:
                 utm.export_admin_config()
-            elif command == 307:
+            elif command == 407:
                 utm.export_admins_list()
-            elif command == 308:
+            elif command == 408:
                 utm.export_certivicates_list()
-            elif command == 399:
+            elif command == 499:
                 utm.export_ui()
                 utm.export_ntp()
                 utm.export_settings()
+                utm.export_snmp_engine()
+                utm.export_pcap_settings()
+                utm.export_tracker_settings()
+                utm.export_statistics_status()
+                utm.export_mc_status()
+                utm.export_update_schedule()
                 utm.export_proxy_portal()
                 utm.export_admin_profiles_list()
                 utm.export_admin_config()
                 utm.export_admins_list()
                 utm.export_certivicates_list()
-
-            elif command == 401:
-                utm.export_groups_lists()
-            elif command == 402:
-                utm.export_users_lists()
-            elif command == 403:
-                utm.export_2fa_profiles()
-            elif command == 404:
-                utm.export_auth_servers()
-            elif command == 405:
-                utm.export_auth_profiles()
-            elif command == 406:
-                utm.export_captive_profiles()
-            elif command == 407:
-                utm.export_captive_portal_rules()
-            elif command == 408:
-                utm.export_byod_policy()
-            elif command == 499:
-                utm.export_groups_lists()
-                utm.export_users_lists()
-                utm.export_2fa_profiles()
-                utm.export_auth_servers()
-                utm.export_auth_profiles()
-                utm.export_captive_profiles()
-                utm.export_captive_portal_rules()
-                utm.export_byod_policy()
 
             elif command == 501:
                 utm.export_firewall_rules()
@@ -5977,28 +6235,31 @@ def executor(utm, mode, section, command):
             elif command == 602:
                 utm.export_safebrowsing_rules()
             elif command == 603:
-                utm.export_ssldecrypt_rules()
+                utm.export_tunnel_inspection_rules()
             elif command == 604:
-                utm.export_sshdecrypt_rules()
+                utm.export_ssldecrypt_rules()
             elif command == 605:
-                utm.export_idps_rules()
+                utm.export_sshdecrypt_rules()
             elif command == 606:
-                utm.export_scada_rules()
+                utm.export_idps_rules()
             elif command == 607:
-                utm.export_scenarios()
+                utm.export_scada_rules()
             elif command == 608:
-                utm.export_mailsecurity_rules()
+                utm.export_scenarios()
             elif command == 609:
-                utm.export_icap_servers()
+                utm.export_mailsecurity_rules()
             elif command == 610:
-                utm.export_icap_rules()
+                utm.export_icap_servers()
             elif command == 611:
-                utm.export_dos_profiles()
+                utm.export_icap_rules()
             elif command == 612:
+                utm.export_dos_profiles()
+            elif command == 613:
                 utm.export_dos_rules()
             elif command == 699:
                 utm.export_content_rules()
                 utm.export_safebrowsing_rules()
+                utm.export_tunnel_inspection_rules()
                 utm.export_ssldecrypt_rules()
                 utm.export_sshdecrypt_rules()
                 utm.export_idps_rules()
@@ -6046,6 +6307,7 @@ def executor(utm, mode, section, command):
             elif command == 9999:
                 utm.export_morphology_lists()
                 utm.export_services_list()
+                utm.export_services_groups()
                 utm.export_IP_lists()
                 utm.export_useragent_lists()
                 utm.export_mime_lists()
@@ -6073,14 +6335,6 @@ def executor(utm, mode, section, command):
                 utm.export_ospf_config()
                 utm.export_bgp_config()
                 utm.export_wccp_list()
-                utm.export_ui()
-                utm.export_ntp()
-                utm.export_settings()
-                utm.export_proxy_portal()
-                utm.export_admin_profiles_list()
-                utm.export_admin_config()
-                utm.export_admins_list()
-                utm.export_certivicates_list()
                 utm.export_groups_lists()
                 utm.export_users_lists()
                 utm.export_2fa_profiles()
@@ -6089,12 +6343,27 @@ def executor(utm, mode, section, command):
                 utm.export_captive_profiles()
                 utm.export_captive_portal_rules()
                 utm.export_byod_policy()
+                utm.export_ui()
+                utm.export_ntp()
+                utm.export_settings()
+                utm.export_snmp_engine()
+                utm.export_pcap_settings()
+                utm.export_tracker_settings()
+                utm.export_statistics_status()
+                utm.export_mc_status()
+                utm.export_update_schedule()
+                utm.export_proxy_portal()
+                utm.export_admin_profiles_list()
+                utm.export_admin_config()
+                utm.export_admins_list()
+                utm.export_certivicates_list()
                 utm.export_firewall_rules()
                 utm.export_nat_rules()
                 utm.export_loadbalancing_rules()
                 utm.export_shaper_rules()
                 utm.export_content_rules()
                 utm.export_safebrowsing_rules()
+                utm.export_tunnel_inspection_rules()
                 utm.export_ssldecrypt_rules()
                 utm.export_sshdecrypt_rules()
                 utm.export_idps_rules()
@@ -6129,7 +6398,7 @@ def executor(utm, mode, section, command):
                 if input_value == " ":
                     break
     else:
-        if utm.version.startswith('6'):
+        if int(utm.version[:1]) > 5:
             utm.init_struct_for_import()
             try:
                 if command == 101:
@@ -6137,42 +6406,45 @@ def executor(utm, mode, section, command):
                 elif command == 102:
                     utm.import_services()
                 elif command == 103:
-                    utm.import_IP_lists()
+                    utm.import_services_groups()
                 elif command == 104:
-                    utm.import_useragent_lists()
+                    utm.import_IP_lists()
                 elif command == 105:
-                    utm.import_mime_lists()
+                    utm.import_useragent_lists()
                 elif command == 106:
-                    utm.import_url_lists()
+                    utm.import_mime_lists()
                 elif command == 107:
-                    utm.import_time_restricted_lists()
+                    utm.import_url_lists()
                 elif command == 108:
-                    utm.import_shaper()
+                    utm.import_time_restricted_lists()
                 elif command == 109:
-                    utm.import_scada_list()
+                    utm.import_shaper()
                 elif command == 110:
-                    utm.import_templates_list()
+                    utm.import_scada_list()
                 elif command == 111:
-                    utm.import_categories_groups()
+                    utm.import_templates_list()
                 elif command == 112:
-                    utm.import_custom_url_list()
+                    utm.import_categories_groups()
                 elif command == 113:
-                    utm.import_application_groups()
+                    utm.import_custom_url_list()
                 elif command == 114:
-                    utm.import_nlist_groups('emailgroup')
+                    utm.import_application_groups()
                 elif command == 115:
-                    utm.import_nlist_groups('phonegroup')
+                    utm.import_nlist_groups('emailgroup')
                 elif command == 116:
-                    utm.import_ips_profiles()
+                    utm.import_nlist_groups('phonegroup')
                 elif command == 117:
-                    utm.import_notification_profiles()
+                    utm.import_ips_profiles()
                 elif command == 118:
-                    utm.import_netflow_profiles()
+                    utm.import_notification_profiles()
                 elif command == 119:
+                    utm.import_netflow_profiles()
+                elif command == 120:
                     utm.import_ssl_profiles()
                 elif command == 199:
                     utm.import_morphology()
                     utm.import_services()
+                    utm.import_services_groups()
                     utm.import_IP_lists()
                     utm.import_useragent_lists()
                     utm.import_mime_lists()
@@ -6218,63 +6490,66 @@ def executor(utm, mode, section, command):
                     utm.import_wccp_rules()
 
                 elif command == 301:
-                    utm.import_ui()
+                    utm.import_ldap_server()
                 elif command == 302:
-                    utm.import_ntp()
+                    utm.import_ntlm_server()
                 elif command == 303:
-                    utm.import_settings()
+                    utm.import_radius_server()
                 elif command == 304:
-                    utm.import_admin_profiles()
+                    utm.import_tacacs_server()
                 elif command == 305:
-                    utm.import_admin_config()
+                    utm.import_saml_server()
                 elif command == 306:
-                    utm.import_admins()
+                    utm.import_auth_profiles()
+                elif command == 307:
+                    utm.import_captive_profiles()
+                elif command == 308:
+                    utm.import_captive_portal_rules()
+                elif command == 309:
+                    utm.import_groups_list()
+                elif command == 310:
+                    utm.import_users_list()
+                elif command == 311:
+                    utm.import_2fa_profiles()
+                elif command == 312:
+                    utm.import_byod_policy()
                 elif command == 399:
+                    utm.import_ldap_server()
+                    utm.import_ntlm_server()
+                    utm.import_radius_server()
+                    utm.import_tacacs_server()
+                    utm.import_saml_server()
+                    utm.import_auth_profiles()
+                    utm.import_captive_profiles()
+                    utm.import_captive_portal_rules()
+                    utm.import_groups_list()
+                    utm.import_users_list()
+                    utm.import_2fa_profiles()
+                    utm.import_byod_policy()
+                       
+                elif command == 401:
+                    utm.import_ui()
+                elif command == 402:
+                    utm.import_ntp()
+                elif command == 403:
+                    utm.import_settings()
+                elif command == 404:
+                    utm.import_proxy_portal()
+                elif command == 405:
+                    utm.import_admin_config()
+                elif command == 406:
+                    utm.import_admin_profiles()
+                elif command == 407:
+                    utm.import_admins()
+                elif command == 499:
                     utm.import_ui()
                     utm.import_ntp()
                     utm.import_settings()
-                    utm.import_admin_profiles()
+                    utm.import_proxy_portal()
                     utm.import_admin_config()
+                    utm.import_admin_profiles()
                     utm.import_admins()
 
-                elif command == 401:
-                    utm.import_groups_list()
-                elif command == 402:
-                    utm.import_users_list()
-                elif command == 403:
-                    utm.import_2fa_profiles()
-                elif command == 404:
-                    utm.import_ldap_server()
-                elif command == 405:
-                    utm.import_ntlm_server()
-                elif command == 406:
-                    utm.import_radius_server()
-                elif command == 407:
-                    utm.import_tacacs_server()
-                elif command == 408:
-                    utm.import_saml_server()
-                elif command == 409:
-                    utm.import_auth_profiles()
-                elif command == 410:
-                    utm.import_captive_profiles()
-                elif command == 411:
-                    utm.import_captive_portal_rules()
-                elif command == 412:
-                    utm.import_byod_policy()
-                elif command == 499:
-                    utm.import_groups_list()
-                    utm.import_users_list()
-                    utm.import_2fa_profiles()
-                    utm.import_ldap_server()
-                    utm.import_ntlm_server()
-                    utm.import_radius_server()
-                    utm.import_tacacs_server()
-                    utm.import_saml_server()
-                    utm.import_auth_profiles()
-                    utm.import_captive_profiles()
-                    utm.import_captive_portal_rules()
-                    utm.import_byod_policy()
-                        
                 elif command == 501:
                     utm.import_scenarios()
                 elif command == 502:
@@ -6283,6 +6558,8 @@ def executor(utm, mode, section, command):
                     utm.import_nat_rules()
                 elif command == 504:
                     utm.import_icap_servers()
+                elif command == 505:
+                    utm.import_reverseproxy_servers()
                 elif command == 506:
                     utm.import_loadbalancing_rules()
                 elif command == 507:
@@ -6292,6 +6569,7 @@ def executor(utm, mode, section, command):
                     utm.import_firewall_rules()
                     utm.import_nat_rules()
                     utm.import_icap_servers()
+                    utm.import_reverseproxy_servers()
                     utm.import_loadbalancing_rules()
                     utm.import_shaper_rules()
 
@@ -6300,31 +6578,40 @@ def executor(utm, mode, section, command):
                 elif command == 602:
                     utm.import_safebrowsing_rules()
                 elif command == 603:
-                    utm.import_ssldecrypt_rules()
+                    utm.import_tunnel_inspection_rules()
                 elif command == 604:
-                    utm.import_sshdecrypt_rules()
+                    utm.import_ssldecrypt_rules()
                 elif command == 605:
-                    utm.import_idps_rules()
+                    utm.import_sshdecrypt_rules()
                 elif command == 606:
-                    utm.import_scada_rules()
+                    utm.import_idps_rules()
                 elif command == 607:
+                    utm.import_scada_rules()
+                elif command == 608:
+                    utm.import_scenarios()
+                elif command == 609:
                     utm.import_mailsecurity_rules()
                     utm.import_mailsecurity_dnsbl()
-                elif command == 608:
-                    utm.import_icap_rules()
-                elif command == 609:
-                    utm.import_dos_profiles()
                 elif command == 610:
+                    utm.import_icap_servers()
+                elif command == 611:
+                    utm.import_icap_rules()
+                elif command == 612:
+                    utm.import_dos_profiles()
+                elif command == 613:
                     utm.import_dos_rules()
                 elif command == 699:
                     utm.import_content_rules()
                     utm.import_safebrowsing_rules()
+                    utm.import_tunnel_inspection_rules()
                     utm.import_ssldecrypt_rules()
                     utm.import_sshdecrypt_rules()
                     utm.import_idps_rules()
                     utm.import_scada_rules()
+                    utm.import_scenarios()
                     utm.import_mailsecurity_rules()
                     utm.import_mailsecurity_dnsbl()
+                    utm.import_icap_servers()
                     utm.import_icap_rules()
                     utm.import_dos_profiles()
                     utm.import_dos_rules()
@@ -6368,6 +6655,7 @@ def executor(utm, mode, section, command):
                 elif command == 9999:
                     utm.import_morphology()
                     utm.import_services()
+                    utm.import_services_groups()
                     utm.import_IP_lists()
                     utm.import_useragent_lists()
                     utm.import_mime_lists()
@@ -6393,15 +6681,6 @@ def executor(utm, mode, section, command):
                     utm.import_dns_config()
                     utm.import_virt_routes()
                     utm.import_wccp_rules()
-                    utm.import_ui()
-                    utm.import_ntp()
-                    utm.import_settings()
-                    utm.import_admin_profiles()
-                    utm.import_admin_config()
-                    utm.import_admins()
-                    utm.import_groups_list()
-                    utm.import_users_list()
-                    utm.import_2fa_profiles()
                     utm.import_ldap_server()
                     utm.import_ntlm_server()
                     utm.import_radius_server()
@@ -6410,15 +6689,26 @@ def executor(utm, mode, section, command):
                     utm.import_auth_profiles()
                     utm.import_captive_profiles()
                     utm.import_captive_portal_rules()
+                    utm.import_groups_list()
+                    utm.import_users_list()
+                    utm.import_2fa_profiles()
                     utm.import_byod_policy()
+                    utm.import_ui()
+                    utm.import_ntp()
+                    utm.import_settings()
+                    utm.import_admin_config()
+                    utm.import_admin_profiles()
+                    utm.import_admins()
                     utm.import_scenarios()
                     utm.import_firewall_rules()
                     utm.import_nat_rules()
                     utm.import_icap_servers()
+                    utm.import_reverseproxy_servers()
                     utm.import_loadbalancing_rules()
                     utm.import_shaper_rules()
                     utm.import_content_rules()
                     utm.import_safebrowsing_rules()
+                    utm.import_tunnel_inspection_rules()
                     utm.import_ssldecrypt_rules()
                     utm.import_sshdecrypt_rules()
                     utm.import_idps_rules()
@@ -6430,7 +6720,6 @@ def executor(utm, mode, section, command):
                     utm.import_dos_rules()
                     utm.import_proxy_portal()
                     utm.import_proxyportal_rules()
-                    utm.import_reverseproxy_servers()
                     utm.import_reverseproxy_rules()
                     utm.import_vpn_security_profiles()
                     utm.import_vpn_networks()
@@ -6457,7 +6746,7 @@ def executor(utm, mode, section, command):
                     if input_value == " ":
                         break
         else:
-            print("\033[31mВы подключились к UTM 5-ой версии. Импорт конфигурации доступен только на версию 6.\033[0m")
+            print("\033[31mВы подключились к UTM 5-ой версии. Импорт конфигурации доступен только для версий 6 и 7.\033[0m")
             while True:
                 input_value = input("\n\nНажмите пробел для возврата в меню: ")
                 if input_value == " ":

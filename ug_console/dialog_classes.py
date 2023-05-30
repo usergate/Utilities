@@ -24,7 +24,7 @@
 import os, json
 from PyQt6.QtGui import *
 from PyQt6.QtCore import Qt, QObject
-from PyQt6.QtWidgets import (QDialog, QPushButton, QVBoxLayout, QFormLayout, QTreeWidget, QTreeWidgetItem,
+from PyQt6.QtWidgets import (QDialog, QPushButton, QVBoxLayout, QHBoxLayout, QFormLayout, QTreeWidget, QTreeWidgetItem,
                              QTabWidget, QWidget, QLineEdit, QTextEdit, QGroupBox, QListWidget, QCheckBox, QFrame,
                              QGridLayout)
 import config_style as cs
@@ -38,16 +38,193 @@ class TestEventTracker():
 #        self.exec()
 
 
-class LineEdit(QLineEdit):
-    def __init__(self, value, frame=True):
+class ZoneSettings(QDialog):
+    """
+    Диалоговое окно "Сеть" --> "Зоны" --> "Редактировать".
+    """
+    def __init__(self, parent, base_path, zone_name):
         super().__init__()
-        self.setStyleSheet(cs.Style.LineEdit)
-        self.setText(value)
-        self.setFrame(frame)
-#        self.setReadOnly(True)
+        self.setParent(parent, Qt.WindowType.Dialog)
+        self.setWindowTitle("Свойства сетевой зоны")
+        self.resize(530, 500)
+        self.path = f"{base_path}/config_zones.json"
+        self.zone_name = zone_name
+        tab = QTabWidget()
+        try:
+            with open(self.path, "r") as fh:
+                data = json.load(fh)
+        except FileNotFoundError as err:
+            cs.message_alert(self, err, f"Не найден файл:\n{self.path}")
+        else:
+            for item in data:
+                if item['name'] == self.zone_name:
+                    self.zone = item
+            self._create_tab_main_settings()
+            self._create_tab_service_access()
+            self._create_tab_anti_spoofing()
+            tab.addTab(self.tab_main_settings, "Общие")
+            tab.addTab(self.tab_service_access, "Контроль доступа")
+            tab.addTab(self.tab_anti_spoofing, "Защита от IP-спуфинга")
 
-    def mousePressEvent(self, e):
-        print("Clicked!", e)
+        buttonOK = QPushButton("Закрыть")
+        buttonOK.clicked.connect(self.accept)
+            
+        layout = QVBoxLayout()
+        layout.addWidget(tab)
+        layout.addWidget(buttonOK)
+        self.setLayout(layout)
+
+    def _create_tab_main_settings(self):
+        """
+        Создаём форму для вкладки "Общие".
+        """
+        self.tab_main_settings = QWidget()
+        dos_profiles = {x['kind']: x for x in self.zone['dos_profiles']}
+
+        form = QFormLayout()
+        text_descr = QTextEdit(self.zone['description'])
+        text_descr.setFixedHeight(60)
+        form.addRow("Зона:", QLineEdit(self.zone['name']))
+        form.addRow("Описание:", text_descr)
+        form.setHorizontalSpacing(20)
+
+        box1 = QGroupBox("Защита от DoS (пакетов/сек) с IP")
+        box1.setStyleSheet(cs.Style.GroupBox)
+
+        box_syn = QGroupBox("SYN")
+        box_syn.setStyleSheet(cs.Style.GroupBox)
+
+        form_box_syn = QFormLayout()
+        syn_enabled = QCheckBox(self)
+        if dos_profiles['syn']['enabled']:
+            syn_enabled.setCheckState(Qt.CheckState.Checked)
+        form_box_syn.addRow("Включено:", syn_enabled)
+        syn_aggregate = QCheckBox(self)
+        if dos_profiles['syn']['aggregate']:
+            syn_aggregate.setCheckState(Qt.CheckState.Checked)
+        form_box_syn.addRow("Агрегировать:", syn_aggregate)
+        form_box_syn.addRow("Порог\nуведомления:", cs.SpinBox(dos_profiles['syn']['alert_threshold'], min_length=1, max_length=200000))
+        form_box_syn.addRow("Порог\nотбрасывания\nпакетов:", cs.SpinBox(dos_profiles['syn']['drop_threshold'], min_length=1, max_length=200000))
+        form_box_syn.setHorizontalSpacing(10)
+        box_syn.setLayout(form_box_syn)
+
+        box_udp = QGroupBox("UDP")
+        box_udp.setStyleSheet(cs.Style.GroupBox)
+
+        form_box_udp = QFormLayout()
+        udp_enabled = QCheckBox(self)
+        if dos_profiles['udp']['enabled']:
+            udp_enabled.setCheckState(Qt.CheckState.Checked)
+        form_box_udp.addRow("Включено:", udp_enabled)
+        udp_aggregate = QCheckBox(self)
+        if dos_profiles['udp']['aggregate']:
+            udp_aggregate.setCheckState(Qt.CheckState.Checked)
+        form_box_udp.addRow("Агрегировать:", udp_aggregate)
+        form_box_udp.addRow("Порог\nуведомления:", cs.SpinBox(dos_profiles['udp']['alert_threshold'], min_length=1, max_length=200000))
+        form_box_udp.addRow("Порог\nотбрасывания\nпакетов:", cs.SpinBox(dos_profiles['udp']['drop_threshold'], min_length=1, max_length=200000))
+        form_box_udp.setHorizontalSpacing(10)
+        box_udp.setLayout(form_box_udp)
+
+        box_icmp = QGroupBox("ICMP")
+        box_icmp.setStyleSheet(cs.Style.GroupBox)
+
+        form_box_icmp = QFormLayout()
+        icmp_enabled = QCheckBox(self)
+        if dos_profiles['icmp']['enabled']:
+            icmp_enabled.setCheckState(Qt.CheckState.Checked)
+        form_box_icmp.addRow("Включено:", icmp_enabled)
+        icmp_aggregate = QCheckBox(self)
+        if dos_profiles['icmp']['aggregate']:
+            icmp_aggregate.setCheckState(Qt.CheckState.Checked)
+        form_box_icmp.addRow("Агрегировать:", icmp_aggregate)
+        form_box_icmp.addRow("Порог\nуведомления:", cs.SpinBox(dos_profiles['icmp']['alert_threshold'], min_length=1, max_length=200000))
+        form_box_icmp.addRow("Порог\nотбрасывания\nпакетов:", cs.SpinBox(dos_profiles['icmp']['drop_threshold'], min_length=1, max_length=200000))
+        form_box_icmp.setHorizontalSpacing(10)
+        box_icmp.setLayout(form_box_icmp)
+        
+        box1_layout = QHBoxLayout()
+        box1_layout.addWidget(box_syn)
+        box1_layout.addWidget(box_udp)
+        box1_layout.addWidget(box_icmp)
+        box1.setLayout(box1_layout)
+        
+        box2 = QGroupBox("Исключения защиты от DoS")
+        box2.setStyleSheet(cs.Style.GroupBox)
+        tree = cs.MyTree(["IP-адрес", "Типы"], root_decor=True)
+#        tree.setStyleSheet(cs.Style.ListTreeEnabledItems)
+        protos = {}
+        for key in dos_profiles:
+            for ip in dos_profiles[key]['excluded_ips']:
+                try:
+                    protos[ip].append(key)
+                except KeyError:
+                    protos[ip] = [key,]
+        items = []
+        for ip, proto in protos.items():
+            item = QTreeWidgetItem([ip, ", ".join(proto)])
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled|Qt.ItemFlag.ItemIsSelectable)
+            items.append(item)
+        tree.insertTopLevelItems(0, items)
+        tree.setColumnWidth(0, 200)
+        box2_layout = QVBoxLayout()
+        box2_layout.addWidget(tree)
+        box2.setLayout(box2_layout)
+
+        layout = QVBoxLayout()
+        layout.addLayout(form)
+        layout.addWidget(box1)
+        layout.addWidget(box2)
+        self.tab_main_settings.setLayout(layout)
+
+    def _create_tab_service_access(self):
+        """
+        Создаём содержимое вкладки "Контроль доступа".
+        """
+        self.tab_service_access = cs.MyTree(["Разрешённые сервисы", "Разрешённые адреса"], root_decor=True)
+        self.tab_service_access.setColumnWidth(0, 320)
+        items = []
+        for val in self.zone["services_access"]:
+            if cs.zone_services[val['service_id']]:
+                item = QTreeWidgetItem([cs.zone_services[val['service_id']], "\n".join(val['allowed_ips']) if val['allowed_ips'] else "Любой"])
+                item.setCheckState(0, Qt.CheckState.Checked if val['enabled'] else Qt.CheckState.Unchecked)
+                items.append(item)
+        self.tab_service_access.insertTopLevelItems(0, items)
+
+    def _create_tab_anti_spoofing(self):
+        """
+        Создаём содержимое вкладки "Защита от IP-спуфинга".
+        """
+        self.tab_anti_spoofing = QWidget()
+
+        enable_antispoof = QCheckBox("Включено", self)
+        if self.zone['enable_antispoof']:
+            enable_antispoof.setCheckState(Qt.CheckState.Checked)
+        antispoof_invert = QCheckBox("Инвертировать", self)
+        if self.zone['antispoof_invert']:
+            antispoof_invert.setCheckState(Qt.CheckState.Checked)
+        hbox_layout = QHBoxLayout()
+        hbox_layout.addWidget(enable_antispoof)
+        hbox_layout.addStretch(1)
+        hbox_layout.addWidget(antispoof_invert)
+
+        tree_anti_spoofing = cs.MyTree(["IP-адрес",], root_decor=True)
+        items = []
+        for ip in self.zone["networks"]:
+            item = QTreeWidgetItem([ip])
+            items.append(item)
+        tree_anti_spoofing.insertTopLevelItems(0, items)
+
+        text = "Диапазоны IP-адресов, адреса источников которых допустимы в данной зоне. Сетевые пакеты с адресами источников отличных от указанных будут отброшены. Если не указаны диапазоны IP-адресов, то используется диапазон локально подключённой сети."
+        label = cs.SelectLabel(text, wrap=True)
+
+        layout = QVBoxLayout()
+        layout.addLayout(hbox_layout)
+        layout.addWidget(tree_anti_spoofing)
+        layout.addWidget(label)
+        self.tab_anti_spoofing.setLayout(layout)
+
+    def __call__(self):
+        self.exec()
 
 
 class CertSettings(QDialog):
@@ -480,10 +657,7 @@ class AdminProfile(QDialog):
         """
         Создаём дерево для вкладки "Разрешения для CLI".
         """
-        self.tab_cli = QTreeWidget()
-        self.tab_cli.setHeaderLabels(["Объекты", "Разрешения"])
-        self.tab_cli.setSortingEnabled(True)
-        self.tab_cli.sortItems(0, Qt.SortOrder.AscendingOrder)
+        self.tab_cli = cs.MyTree(["Объекты", "Разрешения"], root_decor=True)
         self.tab_cli.setColumnWidth(0, 320)
         items = []
         permissions = {
@@ -505,10 +679,7 @@ class AdminProfile(QDialog):
         """
         Создаём дерево для вкладки "Разрешения для API".
         """
-        self.tab_api = QTreeWidget()
-        self.tab_api.setHeaderLabels(["Объекты", "Разрешения"])
-        self.tab_api.setSortingEnabled(True)
-        self.tab_api.sortItems(0, Qt.SortOrder.AscendingOrder)
+        self.tab_api = cs.MyTree(["Объекты", "Разрешения"], root_decor=True)
         self.tab_api.setColumnWidth(0, 320)
         items = []
         permissions = {
@@ -605,11 +776,11 @@ class ProxyPortal(QDialog):
             if data['enabled']:
                 portal_enabled.setCheckState(Qt.CheckState.Checked)
             box1_layout.addRow("Включено:", portal_enabled)
-            box1_layout.addRow("Имя хоста:", LineEdit(data['host']))
-            box1_layout.addRow("Порт:", LineEdit(str(data['port'])))
-            box1_layout.addRow("Профиль аутентификации:", LineEdit(data['user_auth_profile_id']))
-            box1_layout.addRow("Шаблон станицы\nаутентификации:", LineEdit(data['proxy_portal_login_template_id']))
-            box1_layout.addRow("Шаблон портала:", LineEdit(data['proxy_portal_template_id']))
+            box1_layout.addRow("Имя хоста:", cs.LineEdit(data['host']))
+            box1_layout.addRow("Порт:", cs.LineEdit(str(data['port'])))
+            box1_layout.addRow("Профиль аутентификации:", cs.LineEdit(data['user_auth_profile_id']))
+            box1_layout.addRow("Шаблон станицы\nаутентификации:", cs.LineEdit(data['proxy_portal_login_template_id']))
+            box1_layout.addRow("Шаблон портала:", cs.LineEdit(data['proxy_portal_template_id']))
             domain_selector = QCheckBox(self)
             if data['enable_ldap_domain_selector']:
                 domain_selector.setCheckState(Qt.CheckState.Checked)
@@ -619,8 +790,8 @@ class ProxyPortal(QDialog):
                 use_captcha.setCheckState(Qt.CheckState.Checked)
             box1_layout.addRow("Показывать CAPTCHA:", use_captcha)
 
-            box2_layout.addRow("Профиль SSL:", LineEdit(data['ssl_profile_id']))
-            box2_layout.addRow("Сертификат:", LineEdit(str(data['certificate_id'])))
+            box2_layout.addRow("Профиль SSL:", cs.LineEdit(data['ssl_profile_id']))
+            box2_layout.addRow("Сертификат:", cs.LineEdit(str(data['certificate_id'])))
             cert_auth = QCheckBox(self)
             if data['cert_auth_enabled']:
                 cert_auth.setCheckState(Qt.CheckState.Checked)
