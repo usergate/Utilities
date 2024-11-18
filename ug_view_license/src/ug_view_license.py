@@ -20,7 +20,7 @@
 # with this program; if not, contact the site <https://www.gnu.org/licenses/>.
 #
 #--------------------------------------------------------------------------------------------------- 
-# Версия 1.2
+# Версия 1.3 18.11.2024
 # Программа выводит число активных коннектов и список IP-адресов, занимающих лицензию.
 # Так же показывает все данные по текущей лицензии.
 #
@@ -158,14 +158,15 @@ def init_window(window, utm):
     window['-SECURITY_UPDATE-'](modules['securityupdate'] if 'securityupdate' in modules.keys() else 'Нет лицензии')
     window['-ATP-'](modules['atp'] if 'atp' in modules.keys() else 'Нет лицензии')
     window['-MAIL_SEC-'](modules['mailsec'] if 'mailsec' in modules.keys() else 'Нет лицензии')
+    window['-WAF-'](modules['waf'] if 'waf' in modules.keys() else 'Нет лицензии')
     window['-KAS-'](modules['kas'] if 'kas' in modules.keys() else 'Нет лицензии')
+    if utm.version_hight == 6:
+        window['-WAF-']('В версии 6 недоступно')
+    elif utm.version_hight == 7:
+        window['-KAS-'](modules['antivirus_usergate'] if 'antivirus_usergate' in modules.keys() else 'Нет лицензии')
     window['-CLUSTER-'](modules['cluster'] if 'cluster' in modules.keys() else 'Нет лицензии')
-    if license['version'].startswith('7'):
-        window['-SCADA-'](modules['scada'] if 'scada' in modules.keys() else 'Нет лицензии')
-        window['-PRSUPPORT-'](modules['premiumsupport'] if 'premiumsupport' in modules.keys() else 'Нет лицензии')
-    else:
-        window['-SCADA-'](modules['scada'] if 'scada' in modules.keys() else 'Бессрочная')
-        window['-PRSUPPORT-'](modules['premiumsupport'] if 'premiumsupport' in modules.keys() else 'Не определено')
+    window['-PRSUPPORT-'](modules['premiumsupport'] if 'premiumsupport' in modules.keys() else 'Нет лицензии')
+#    window['-SCADA-'](modules['scada'] if 'scada' in modules.keys() else 'Нет лицензии')
 
     user_limit = license['user_limit']
     number_ips = utm.get_active_ips_number()
@@ -191,8 +192,9 @@ def make_window():
         [TextKey('ATP:')],
         [TextKey('Mail security:')],
         [TextKey('Потоковый антивирус UserGate:')],
-        [TextKey('Scada:')],
+#        [TextKey('Scada:')],
         [TextKey('Cluster:')],
+        [TextKey('WAF:')],
         [TextKey('Premium Support:')],
     ]
     col2 = [
@@ -200,8 +202,9 @@ def make_window():
         [TextValue(key='-ATP-')],
         [TextValue(key='-MAIL_SEC-')],
         [TextValue(key='-KAS-')],
-        [TextValue(key='-SCADA-')],
+#        [TextValue(key='-SCADA-')],
         [TextValue(key='-CLUSTER-')],
+        [TextValue(key='-WAF-')],
         [TextValue(key='-PRSUPPORT-')],
     ]
     frame_layout = [
@@ -236,6 +239,7 @@ def make_window():
     return sg.Window('Монитор лицензий v1.2',
                     layout,
                     keep_on_top=True,
+                    icon="favicon.png",
                     location=get_location(),
                     resizable=True,
                     element_padding=(2, 5),

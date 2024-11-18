@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #########################################################################################
-# Версия 0.1                                                                            #
+# Версия 0.2                                                                            #
 # Общий класс для работы с xml-rpc                                                      #
 #########################################################################################
 import sys
@@ -11,14 +11,16 @@ from PySimpleGUI import PopupError
 
 class UTM:
     def __init__(self, server_ip, login, password):
+        self.server_ip = server_ip
         self._login = login
         self._password = password
         self._url = f'http://{server_ip}:4040/rpc'
         self._auth_token = None
         self._server = None
-        self.version = None
-        self.server_ip = server_ip
         self.node_name = None
+        self.version = None
+        self.float_version = None
+        self.version_hight = None
 
     def connect(self):
         """Подключиться к UTM"""
@@ -29,6 +31,9 @@ class UTM:
                 self._auth_token = result.get('auth_token')
                 self.node_name =  result.get('node')
                 self.version = result.get('version')
+                tmp = self.version.split('.')
+                self.version_hight = int(tmp[0])
+                self.float_version = float(f'{tmp[0]}.{tmp[1]}')
             else:
                 PopupError('Ошибка: UTM не позволяет установить соединение!', keep_on_top=True)
                 sys.exit(1)
@@ -64,14 +69,20 @@ class UTM:
             PopupError(f'Ошибка get_license_info: [{err.faultCode}] — {err.faultString}', keep_on_top=True)
             sys.exit(1)
         if result['expiry_date'] != 'infinity':
-                expire_date = dt.strptime(result['expiry_date'].value, "%Y-%m-%dT%H:%M:%SZ")
+#                print('expiry_date', '-', result['expiry_date'], '\n')
+#                expire_date = dt.strptime(result['expiry_date'].value, "%Y-%m-%dT%H:%M:%SZ")
+                expire_date = dt.strptime(result['expiry_date'], "%Y-%m-%dT%H:%M:%SZ")
                 result['expiry_date'] = expire_date.strftime("%d-%b-%Y")
         else:
             result['expiry_date'] = 'Бессрочная'
         for license in result['modules']:
             try:
                 if license['expiry'] != 'infinity':
-                    expire_date = dt.strptime(license['expiry'].value, "%Y-%m-%dT%H:%M:%S")
+#                    print(license['expiry'])
+                    if self.float_version < 7.0:
+                        expire_date = dt.strptime(license['expiry'].value, "%Y-%m-%dT%H:%M:%S")
+                    else:
+                        expire_date = dt.strptime(license['expiry'].value, "%Y-%m-%dT%H:%M:%SZ")
                     license['expiry'] = expire_date.strftime("%d-%b-%Y")
                 else:
                     license['expiry'] = 'Бессрочная'
