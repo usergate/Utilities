@@ -236,7 +236,7 @@ def make_window():
         [sg.Button(visible=False), sg.Button('Обновить'), sg.Button('Сохранить в файл', key='-SAVE-'), sg.Exit()]
 
     ]
-    return sg.Window('Монитор лицензий v1.2',
+    return sg.Window('Монитор лицензий v1.3',
                     layout,
                     keep_on_top=True,
                     icon="favicon.png",
